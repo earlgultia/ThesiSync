@@ -1,0 +1,74 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate icons
+        run: npm run generate:icons
+      - name: Build web assets
+        run: npm run build
+      - name: Install Capacitor
+        run: npm install @capacitor/cli @capacitor/core
+      - name: Add Android platform (idempotent)
+        run: npx cap add android || true
+      - name: Copy web assets to Android
+        run: npx cap copy android
+      - name: Finalize Android (copy mipmap + patch Gradle)
+        run: node ./scripts/finalize-android.js
+      - name: Configure signing keystore (from secrets)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "Decoding keystore from secret..."
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/keystore.jks
+            echo "Signing keystore written to android/keystore.jks"
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret provided; skipping keystore decode"
+          fi
+
+      - name: Create gradle properties for signing (if secrets provided)
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            echo "ORG_GRADLE_PROJECT_keystoreFile=keystore.jks" > android/gradle.properties
+            echo "ORG_GRADLE_PROJECT_keystorePassword=$ANDROID_KEYSTORE_PASSWORD" >> android/gradle.properties
+            echo "ORG_GRADLE_PROJECT_keyAlias=$ANDROID_KEY_ALIAS" >> android/gradle.properties
+            echo "ORG_GRADLE_PROJECT_keyPassword=$ANDROID_KEY_PASSWORD" >> android/gradle.properties
+            echo "Wrote android/gradle.properties"
+          else
+            echo "No signing secrets provided; skipping gradle.properties"
+          fi
+
+      - name: Run Gradle assemble (debug + release)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug assembleRelease -x lint || true
+      - name: Upload debug APK (if exists)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload release APK (if exists)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk

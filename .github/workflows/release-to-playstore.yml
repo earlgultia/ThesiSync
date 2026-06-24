@@ -1,0 +1,38 @@
+name: Release to Google Play
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate icons
+        run: npm run generate:icons
+      - name: Build web assets
+        run: npm run build
+      - name: Copy web assets to Android
+        run: npx cap copy android
+      - name: Finalize Android
+        run: node ./scripts/finalize-android.js
+      - name: Build Release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease -x lint
+      - name: Upload Release to Play Store
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ secrets.PLAYSTORE_PACKAGE_NAME }}
+          releaseFiles: android/app/build/outputs/apk/release/app-release.apk
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
