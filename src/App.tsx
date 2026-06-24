@@ -13,6 +13,7 @@ import {
   Grid2X2,
   Info,
   LogIn,
+  LogOut,
   Menu,
   MessageSquare,
   MoreVertical,
@@ -37,7 +38,7 @@ import { Progress } from "@/components/ui/progress";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
-type Screen = "landing" | "login" | "register" | "dashboard" | "tasks" | "files" | "meetings";
+type Screen = "landing" | "login" | "register" | "dashboard" | "createProject" | "tasks" | "files" | "meetings";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: Grid2X2 },
@@ -71,7 +72,49 @@ const meetings = [
 ] as const;
 
 function App() {
-  const [screen, setScreen] = useState<Screen>("dashboard");
+  const [screen, setScreen] = useState<Screen>("landing");
+  const [isAuthChecked, setIsAuthChecked] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkAuth = async () => {
+      if (!isSupabaseConfigured) {
+        if (isMounted) setIsAuthChecked(true);
+        return;
+      }
+
+      const { data, error } = await supabase.auth.getSession();
+      if (isMounted) {
+        if (data?.session?.user) {
+          setScreen((current) =>
+            current === "landing" || current === "login" || current === "register"
+              ? "dashboard"
+              : current,
+          );
+        }
+        setIsAuthChecked(true);
+      }
+    };
+
+    checkAuth();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  if (!isAuthChecked) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-950">
+        <MobileFrame>
+          <div className="mx-auto mt-20 max-w-[430px] rounded-3xl border border-[#c4c6cf] bg-white p-8 text-center shadow-sm">
+            <p className="text-sm font-medium text-[#475569]">Checking authentication...</p>
+          </div>
+        </MobileFrame>
+      </div>
+    );
+  }
 
   if (screen === "landing") {
     return (
@@ -104,6 +147,12 @@ function App() {
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <MobileFrame>
         {screen === "dashboard" && <DashboardScreen onNavigate={setScreen} />}
+        {screen === "createProject" && (
+          <CreateProjectScreen
+            onCancel={() => setScreen("dashboard")}
+            onCreated={() => setScreen("dashboard")}
+          />
+        )}
         {screen === "tasks" && <TasksScreen />}
         {screen === "files" && <FilesScreen />}
         {screen === "meetings" && <MeetingsScreen />}
@@ -125,10 +174,12 @@ function Header({
   compact,
   title = "Dissertation Hub",
   userName,
+  onLogout,
 }: {
   compact?: boolean;
   title?: string;
   userName?: string;
+  onLogout?: () => void;
 }) {
   return (
     <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-[#c4c6cf] bg-[#f7fafc] px-5 backdrop-blur-sm">
@@ -149,10 +200,28 @@ function Header({
           {title}
         </h1>
       </div>
-      <div className="flex items-center gap-4">
-        <button className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ffffff] text-[#0f172a] shadow-sm transition hover:bg-[#e2e8f0]">
+      <div className="flex items-center gap-3">
+        <button className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ffffff] text-[#0f172a] shadow-sm transition hover:bg-[#e2e8f0]" type="button">
           <Bell className="size-5" />
         </button>
+        {onLogout ? (
+          <>
+            <Button
+              className="hidden h-11 rounded-full bg-[#e2e8f0] px-4 text-sm font-semibold text-[#0f172a] hover:bg-[#cbd5e1] md:inline-flex"
+              onClick={onLogout}
+              type="button"
+            >
+              Logout
+            </Button>
+            <button
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[#e2e8f0] text-[#0f172a] shadow-sm transition hover:bg-[#cbd5e1] md:hidden"
+              onClick={onLogout}
+              type="button"
+            >
+              <LogOut className="size-5" />
+            </button>
+          </>
+        ) : null}
         {compact ? (
           <Avatar name={userName ?? "User"} className="size-8 bg-[#0f172a] text-white" />
         ) : userName ? (
@@ -174,6 +243,14 @@ function LandingScreen({
 }) {
   return (
     <main className="min-h-screen bg-[#eef3f8] text-[#181c1e]">
+      {!isSupabaseConfigured && (
+        <div className="mx-auto mt-4 max-w-[430px] rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="size-5" />
+            <span>Supabase not configured — add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to your `.env`.</span>
+          </div>
+        </div>
+      )}
       <section className="mx-auto min-h-screen max-w-[430px] overflow-hidden bg-white">
         <div className="border-b border-[#e0e3e5] bg-white px-5 pb-6 pt-6">
           <div>
@@ -347,6 +424,15 @@ function LoginScreen({
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f7fafc] p-4 text-[#181c1e]">
       <div className="fixed left-0 top-0 h-1 w-full bg-gradient-to-r from-[#002045] via-[#1960a3] to-[#1a365d] opacity-50" />
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(90deg,rgba(0,32,69,0.04)_1px,transparent_1px),linear-gradient(rgba(0,32,69,0.04)_1px,transparent_1px)] bg-[size:36px_36px]" />
+
+      {!isSupabaseConfigured && (
+        <div className="absolute top-14 left-1/2 z-20 w-[92%] -translate-x-1/2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="size-5" />
+            <span>Supabase not configured — add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to your `.env`.</span>
+          </div>
+        </div>
+      )}
 
       <div className="mx-auto w-full max-w-[420px]">
         <section className="mb-12 text-center">
@@ -778,6 +864,21 @@ function getDate(row: DatabaseRecord, keys: string[]) {
   return null;
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms = 10000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Supabase request timed out. Please refresh.")), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 function asRecord(value: unknown): DatabaseRecord | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -886,44 +987,61 @@ async function createProjectForUser(
   title: string,
   description: string,
 ): Promise<DashboardProject | null> {
-  const result = await supabase
-    .from("thesis_projects")
-    .insert({
-      title,
-      description,
-      owner_id: userId,
-      created_by: userId,
-      student_id: userId,
-    })
-    .select("*")
-    .maybeSingle();
-
-  if (result.error) {
-    throw result.error;
+  // Resolve effective user id from argument or current auth session
+  let effectiveUserId = userId;
+  try {
+    if (!effectiveUserId) {
+      const u = await supabase.auth.getUser();
+      effectiveUserId = u.data?.user?.id ?? "";
+    }
+  } catch (err) {
+    console.warn("createProjectForUser: unable to read auth user, proceeding without user id", err);
+    effectiveUserId = effectiveUserId ?? "";
   }
 
-  const project = asRecord(result.data);
-  return project ? normalizeProject(project) : null;
+  // Try inserting with multiple common owner columns, retrying if the schema differs
+  const candidateInserts: Record<string, any>[] = [];
+  if (effectiveUserId) {
+    candidateInserts.push({ title, description, owner_id: effectiveUserId, created_by: effectiveUserId, student_id: effectiveUserId });
+    candidateInserts.push({ title, description, created_by: effectiveUserId, student_id: effectiveUserId });
+    candidateInserts.push({ title, description, student_id: effectiveUserId });
+  }
+  candidateInserts.push({ title, description });
+
+  let lastError: unknown = null;
+  for (const payload of candidateInserts) {
+    console.debug("createProjectForUser trying payload:", payload);
+    const result = await supabase.from("thesis_projects").insert(payload as any).select("*").maybeSingle();
+    if (!result.error) {
+      const project = asRecord(result.data);
+      return project ? normalizeProject(project) : null;
+    }
+
+    lastError = result.error;
+    const msg = (result.error && (result.error as any).message) || "";
+    const isMissingColumnError = /column .* does not exist/i.test(String(msg)) || /Could not find the '.*' column/i.test(String(msg));
+    if (!isMissingColumnError) {
+      console.error("createProjectForUser insert failed:", result.error, payload);
+      throw result.error;
+    }
+  }
+
+  console.error("createProjectForUser failed with all insert payloads", lastError);
+  throw lastError instanceof Error ? lastError : new Error("Unable to create a project. Please check your thesis_projects schema.");
 }
 
 async function fetchFirstProjectForUser(userId: string) {
   const membershipResult = await supabase
     .from("group_members")
-    .select("groups(project_id, thesis_projects(*))")
+    .select("project_id")
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
 
-  if (!membershipResult.error) {
-    const membership = asRecord(membershipResult.data);
-    const group = asRecord(membership?.groups);
-    const projectFromGroup = asRecord(group?.thesis_projects);
+  if (!membershipResult.error && membershipResult.data) {
+    const membership = asRecord(membershipResult.data) ?? {};
+    const projectId = getString(membership, ["project_id"]);
 
-    if (projectFromGroup) {
-      return normalizeProject(projectFromGroup);
-    }
-
-    const projectId = getString(group ?? {}, ["project_id"]);
     if (projectId) {
       const projectResult = await supabase
         .from("thesis_projects")
@@ -931,28 +1049,33 @@ async function fetchFirstProjectForUser(userId: string) {
         .eq("id", projectId)
         .maybeSingle();
 
+      if (!projectResult.error && projectResult.data) {
+        const project = asRecord(projectResult.data);
+        return project ? normalizeProject(project) : null;
+      }
+
       if (projectResult.error) {
         throw projectResult.error;
       }
-
-      const project = asRecord(projectResult.data);
-      return project ? normalizeProject(project) : null;
     }
   }
 
-  const ownProjectResult = await supabase
-    .from("thesis_projects")
-    .select("*")
-    .or(`owner_id.eq.${userId},created_by.eq.${userId},student_id.eq.${userId}`)
-    .limit(1)
-    .maybeSingle();
-
-  if (ownProjectResult.error) {
-    throw ownProjectResult.error;
+  // Try common ownership columns one by one to support varying schemas
+  const candidateColumns = ["created_by", "student_id", "owner_id"];
+  for (const col of candidateColumns) {
+    try {
+      const res = await supabase.from("thesis_projects").select("*").eq(col, userId).limit(1).maybeSingle();
+      if (!res.error && res.data) {
+        const ownProject = asRecord(res.data);
+        return ownProject ? normalizeProject(ownProject) : null;
+      }
+    } catch (e) {
+      // ignore and try next column
+      console.warn(`thesis_projects column lookup failed for ${col}:`, e);
+    }
   }
 
-  const ownProject = asRecord(ownProjectResult.data);
-  return ownProject ? normalizeProject(ownProject) : null;
+  return null;
 }
 
 async function fetchProjectRows(
@@ -1007,107 +1130,112 @@ async function fetchLatestFeedback(projectId: string): Promise<DashboardFeedback
 }
 
 async function loadDashboardData(): Promise<DashboardLoadState> {
-  if (!isSupabaseConfigured) {
+  try {
+    if (!isSupabaseConfigured) {
+      return {
+        status: "error",
+        message: "Supabase is not configured. Please add your Supabase keys in .env.",
+      };
+    }
+
+    const [{ data: userData, error: userError }, { data: sessionData, error: sessionError }] =
+      await Promise.all([
+        withTimeout(supabase.auth.getUser()),
+        withTimeout(supabase.auth.getSession()),
+      ]);
+
+    if (userError) {
+      return { status: "error", message: userError.message };
+    }
+
+    if (sessionError) {
+      return { status: "error", message: sessionError.message };
+    }
+
+    const user = userData.user ?? sessionData?.session?.user;
+    if (!user) {
+      return {
+        status: "empty",
+        message: "You are not signed in. Please sign in to view your dashboard.",
+      };
+    }
+
+    const userName = getString(
+      asRecord(user.user_metadata) ?? {},
+      ["full_name", "name"],
+      user.email ?? "User",
+    );
+
+    const project = await withTimeout(fetchFirstProjectForUser(user.id));
+
+    if (!project) {
+      return {
+        status: "empty",
+        message: "No thesis project was found. Create a project to populate your dashboard.",
+        userId: userData.user.id,
+        userName,
+      };
+    }
+
+    const taskRows = await withTimeout(fetchProjectRows("tasks", project.id, "due_date"));
+    const milestoneRows = await withTimeout(fetchProjectRows("milestones", project.id, "created_at"));
+    const feedback = await withTimeout(fetchLatestFeedback(project.id));
+    const progress = deriveProgress(project, taskRows);
+    const milestones = (milestoneRows.length ? milestoneRows : taskRows)
+      .slice(0, 2)
+      .map((row, index) =>
+        milestoneRows.length ? normalizeMilestone(row, index) : normalizeTaskAsMilestone(row, index),
+      );
+    const deadlines = taskRows
+      .map(normalizeDeadline)
+      .filter((deadline): deadline is DashboardDeadline => Boolean(deadline))
+      .filter((deadline) => deadline.daysLeft >= 0)
+      .sort((first, second) => first.dueDate.getTime() - second.dueDate.getTime())
+      .slice(0, 2);
+
+    return {
+      status: "ready",
+      data: {
+        userName: getString(
+          asRecord(userData.user.user_metadata) ?? {},
+          ["full_name", "name"],
+          userData.user.email ?? "User",
+        ),
+        project: { ...project, progress },
+        milestones,
+        deadlines,
+        feedback,
+      },
+    };
+  } catch (err: unknown) {
+    console.error("loadDashboardData error:", err);
+    const message =
+      err instanceof Error
+        ? err.message
+        : typeof err === "object"
+        ? JSON.stringify(err, Object.getOwnPropertyNames(err))
+        : String(err);
+
     return {
       status: "error",
-      message: "Supabase is not configured. Please add your Supabase keys in .env.",
+      message,
     };
   }
-
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-
-  if (userError) {
-    return { status: "error", message: userError.message };
-  }
-
-  if (!userData.user) {
-    return {
-      status: "empty",
-      message: "You are not signed in. Please sign in to view your dashboard.",
-    };
-  }
-
-  const userName = getString(
-    asRecord(userData.user.user_metadata) ?? {},
-    ["full_name", "name"],
-    userData.user.email ?? "User",
-  );
-
-  const project = await fetchFirstProjectForUser(userData.user.id);
-
-  if (!project) {
-    return {
-      status: "empty",
-      message: "No thesis project was found. Create a project to populate your dashboard.",
-      userId: userData.user.id,
-      userName,
-    };
-  }
-
-  const taskRows = await fetchProjectRows("tasks", project.id, "due_date");
-  const milestoneRows = await fetchProjectRows("milestones", project.id, "created_at");
-  const feedback = await fetchLatestFeedback(project.id);
-  const progress = deriveProgress(project, taskRows);
-  const milestones = (milestoneRows.length ? milestoneRows : taskRows)
-    .slice(0, 2)
-    .map((row, index) =>
-      milestoneRows.length ? normalizeMilestone(row, index) : normalizeTaskAsMilestone(row, index),
-    );
-  const deadlines = taskRows
-    .map(normalizeDeadline)
-    .filter((deadline): deadline is DashboardDeadline => Boolean(deadline))
-    .filter((deadline) => deadline.daysLeft >= 0)
-    .sort((first, second) => first.dueDate.getTime() - second.dueDate.getTime())
-    .slice(0, 2);
-
-  return {
-    status: "ready",
-    data: {
-      userName: getString(
-        asRecord(userData.user.user_metadata) ?? {},
-        ["full_name", "name"],
-        userData.user.email ?? "User",
-      ),
-      project: { ...project, progress },
-      milestones,
-      deadlines,
-      feedback,
-    },
-  };
 }
 
 function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
   const [dashboardState, setDashboardState] = useState<DashboardLoadState>({ status: "loading" });
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [projectMessage, setProjectMessage] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  async function handleCreateProject() {
-    if (dashboardState.status !== "empty" || !dashboardState.userId) {
-      return;
-    }
-
-    setIsCreatingProject(true);
-    setProjectMessage("");
-
+  async function handleLogout() {
     try {
-      const project = await createProjectForUser(
-        dashboardState.userId,
-        `${dashboardState.userName ?? "Thesis"} Project`,
-        "A new thesis project created from your dashboard.",
-      );
-
-      if (!project) {
-        setProjectMessage("Unable to create a project right now.");
-        return;
-      }
-
-      const refreshed = await loadDashboardData();
-      setDashboardState(refreshed);
-    } catch (error: unknown) {
-      setProjectMessage(error instanceof Error ? error.message : "Unable to create a project.");
-    } finally {
-      setIsCreatingProject(false);
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Logout failed:", error);
     }
+    onNavigate("login");
   }
 
   useEffect(() => {
@@ -1121,6 +1249,7 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
       })
       .catch((error: unknown) => {
         if (isMounted) {
+          console.error("Dashboard load error:", error);
           setDashboardState({
             status: "error",
             message: error instanceof Error ? error.message : "Unable to load dashboard data.",
@@ -1133,12 +1262,32 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
     };
   }, []);
 
+  async function refreshDashboard() {
+    setIsRefreshing(true);
+    setDashboardState({ status: "loading" });
+    try {
+      const state = await loadDashboardData();
+      setDashboardState(state);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object"
+          ? JSON.stringify(err, Object.getOwnPropertyNames(err))
+          : String(err);
+      setDashboardState({ status: "error", message });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+
   if (dashboardState.status === "loading") {
     return (
       <>
-        <Header />
+        <Header onLogout={handleLogout} />
         <main className="grid gap-6 px-4 pb-28 pt-6 md:grid-cols-[1fr_320px] md:px-8">
-          <DashboardNotice title="Loading dashboard" message="Fetching your live thesis data." />
+          <DashboardNotice title="Loading dashboard" message="Fetching your thesis data." />
         </main>
       </>
     );
@@ -1147,12 +1296,31 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
   if (dashboardState.status === "empty" || dashboardState.status === "error") {
     return (
       <>
-        <Header />
+        <Header onLogout={handleLogout} />
         <main className="grid gap-6 px-4 pb-28 pt-6 md:grid-cols-[1fr_320px] md:px-8">
           <DashboardNotice
             title={dashboardState.status === "error" ? "Dashboard unavailable" : "No dashboard data"}
             message={dashboardState.message}
           />
+          {dashboardState.status === "error" && (
+            <Button
+              className="h-12 rounded-lg bg-[#1a365d] text-sm font-semibold text-white hover:bg-[#002045]"
+              onClick={() => refreshDashboard()}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? (
+                <>
+                  <svg className="mr-2 inline-block h-4 w-4 animate-spin" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  Retrying...
+                </>
+              ) : (
+                'Try Again'
+              )}
+            </Button>
+          )}
           {dashboardState.status === "empty" && (
             <Card className="rounded-lg border-[#c4c6cf] bg-white shadow-sm">
               <CardContent className="space-y-4 p-6">
@@ -1166,9 +1334,9 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
                   <Button
                     className="h-12 rounded-lg bg-[#1a365d] text-sm font-semibold text-white hover:bg-[#002045]"
                     disabled={isCreatingProject || !dashboardState.userId}
-                    onClick={handleCreateProject}
+                    onClick={() => onNavigate("createProject")}
                   >
-                    {isCreatingProject ? "Creating project..." : "Create Project"}
+                    Create Project
                   </Button>
                   <Button
                     className="h-12 rounded-lg border-[#1960a3] text-sm font-semibold text-[#1960a3] hover:bg-[#ebeef0]"
@@ -1195,21 +1363,57 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
 
   return (
     <>
-      <header className="w-full sticky top-0 z-40 bg-[#f7fafc] border-b border-[#e0e3e5]">
-        <div className="mx-auto flex max-w-[1280px] items-center justify-between px-4 py-4 md:px-8">
-          <div className="flex items-center gap-4">
-            <div className="h-10 w-10 overflow-hidden rounded-full bg-[#f1f4f6] border border-[#e0e3e5]">
-              <Avatar name={dashboardState.data.userName ?? "Student"} className="h-full w-full" />
-            </div>
-            <h1 className="text-xl font-semibold text-[#002045]">Dissertation Hub</h1>
-          </div>
-          <button className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#002045] shadow-sm transition hover:bg-[#e2e8f0]" type="button">
-            <Bell className="size-5" />
-          </button>
-        </div>
-      </header>
+      <Header title="Dissertation Hub" userName={dashboardState.data.userName} onLogout={handleLogout} />
 
       <main className="flex min-h-[calc(100vh-76px)] flex-col gap-6 bg-[#f7fafc] px-4 py-6 md:flex-row md:px-8">
+        <aside className="hidden md:flex md:w-[280px] md:flex-col md:gap-6">
+          <div className="rounded-3xl border border-[#e0e3e5] bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-[#002045]">Academic Portal</h2>
+            <div className="mt-4 flex items-center gap-3 rounded-3xl border border-[#e0e3e5] bg-[#f1f5f9] p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#dbeafe] text-[#1d4ed8]">S</div>
+              <div>
+                <p className="text-sm font-semibold text-[#002045]">Student Portal</p>
+                <p className="text-[12px] text-[#64748b]">Thesis Year 2024</p>
+              </div>
+            </div>
+          </div>
+
+          <nav className="rounded-3xl border border-[#e0e3e5] bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-2">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const active = item.id === "dashboard";
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onNavigate(item.id)}
+                    type="button"
+                    className={cn(
+                      "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold transition",
+                      active ? "bg-[#dbeafe] text-[#1d4ed8]" : "text-[#475569] hover:bg-[#f8fafc]",
+                    )}
+                  >
+                    <Icon className="size-5" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => onNavigate("meetings")}
+                className="mt-4 flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold text-[#475569] hover:bg-[#f8fafc]"
+              >
+                <Info className="size-5" />
+                <span>Settings</span>
+              </button>
+            </div>
+          </nav>
+
+          <div className="rounded-3xl border border-[#e0e3e5] bg-white p-4 text-center text-[10px] uppercase tracking-[0.18em] text-[#64748b]">
+            v1.0.2
+          </div>
+        </aside>
+
         <div className="flex-1 space-y-6">
           <section className="rounded-3xl border border-[#e0e3e5] bg-white p-6">
             <div className="flex flex-col gap-2">
@@ -1372,6 +1576,123 @@ function DashboardEmptyLine({ message }: { message: string }) {
   );
 }
 
+function CreateProjectScreen({
+  onCancel,
+  onCreated,
+}: {
+  onCancel: () => void;
+  onCreated: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function handleCreate() {
+    setMessage("");
+    setIsCreating(true);
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        throw userError;
+      }
+
+      const userId = userData.user?.id;
+      if (!userId) {
+        setMessage("Please sign in before creating a project.");
+        return;
+      }
+
+      const project = await createProjectForUser(
+        userId,
+        title.trim() || "New Thesis Project",
+        description.trim() || "A new thesis project created from the dashboard.",
+      );
+
+      if (!project) {
+        setMessage("Unable to create a project right now.");
+        return;
+      }
+
+      onCreated();
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === "object"
+          ? JSON.stringify(error, Object.getOwnPropertyNames(error))
+          : String(error);
+      setMessage(message || "Unable to create a project.");
+    } finally {
+      setIsCreating(false);
+    }
+  }
+
+  return (
+    <>
+      <Header compact title="Create Project" />
+      <main className="mx-auto max-w-[430px] px-5 py-6">
+        <Card className="rounded-lg border-[#c4c6cf] bg-white shadow-sm">
+          <CardContent className="space-y-6 p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-[#002045]">Create thesis project</h2>
+                <p className="mt-2 text-sm leading-6 text-[#475569]">
+                  Add a project title, description, and launch it into your dashboard.
+                </p>
+              </div>
+              <Button variant="outline" className="text-sm" onClick={onCancel} type="button">
+                Cancel
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-[#334155]">Project title</label>
+                <Input
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Enter project title"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-[#334155]">Project description</label>
+                <textarea
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  className="min-h-[120px] w-full rounded-xl border border-[#c4c6cf] bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-[#1d4ed8] focus:ring-2 focus:ring-[#93c5fd]"
+                  placeholder="Describe the goal of this thesis project."
+                />
+              </div>
+            </div>
+
+            {message ? <p className="text-sm font-medium text-red-700">{message}</p> : null}
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button
+                className="h-12 rounded-lg bg-[#1a365d] text-sm font-semibold text-white hover:bg-[#002045]"
+                onClick={handleCreate}
+                disabled={isCreating}
+              >
+                {isCreating ? "Creating project..." : "Create Project"}
+              </Button>
+              <Button
+                variant="outline"
+                className="h-12 rounded-lg border-[#1960a3] text-sm font-semibold text-[#1960a3] hover:bg-[#ebeef0]"
+                onClick={onCancel}
+                type="button"
+              >
+                Back to dashboard
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+    </>
+  );
+}
+
 function DeadlineCard({
   deadline,
   onNavigate,
@@ -1486,132 +1807,138 @@ function FilesScreen() {
 
   return (
     <>
-      <Header compact title="Manuscript Feedback" />
+      <Header title="Manuscript" />
       <main className="grid gap-6 px-4 pb-28 pt-5 lg:grid-cols-12 md:px-8">
-        <section className="flex flex-col gap-3 lg:col-span-8">
-          <Card className="rounded-lg border-[#c4c6cf] bg-white">
-            <CardContent className="flex flex-col justify-between gap-4 p-6 md:flex-row md:items-center">
-              <div className="flex items-center gap-4">
-                <div className="flex size-12 items-center justify-center rounded-lg bg-[#ffdad6] text-[#ba1a1a]">
-                  <FileText className="size-7" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold leading-7 text-[#181c1e]">Upload Latest Manuscript</h2>
-                  <p className="text-xs font-semibold leading-4 text-[#74777f]">
-                    Upload your current draft and track advisor review status.
-                  </p>
-                </div>
+        <section className="flex flex-col gap-4 lg:col-span-7">
+          <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
+            <CardContent className="grid gap-6 p-6 md:grid-cols-[1.2fr_0.8fr] md:items-center">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#1960a3]">
+                  Manuscript workspace
+                </p>
+                <h2 className="mt-3 text-2xl font-semibold text-[#181c1e]">
+                  Upload and review your latest draft
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-[#475569]">
+                  Keep your advisor feedback, revision actions, and file history in one document
+                  centered workspace.
+                </p>
               </div>
-              <form className="flex flex-col gap-3 sm:flex-row sm:items-center" onSubmit={handleUpload}>
-                <label className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-[#c4c6cf] bg-[#f7fafc] px-4 py-3 text-sm font-medium text-[#43474e] shadow-sm transition hover:border-[#1960a3]">
+              <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569] shadow-inner">
+                <p className="font-semibold text-[#0f172a]">Current file</p>
+                <p className="mt-2">No manuscript uploaded yet.</p>
+                <p className="mt-3 text-xs text-[#64748b]">
+                  Accepted formats: PDF, DOC, DOCX
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
+            <CardContent className="flex flex-col gap-6 p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-3xl bg-[#e0f2fe] text-[#1d4ed8]">
+                    <FileText className="size-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-[#0f172a]">Upload Latest Manuscript</h3>
+                    <p className="text-sm text-[#475569]">
+                      Upload your current draft and track reviewer feedback instantly.
+                    </p>
+                  </div>
+                </div>
+                <Button className="h-11 rounded-full bg-[#002045] px-5 text-sm font-semibold text-white hover:bg-[#1a365d]/90" type="submit" disabled={isUploading} form="manuscript-upload">
+                  {isUploading ? "Uploading..." : "Upload"}
+                </Button>
+              </div>
+
+              <form id="manuscript-upload" className="grid gap-4" onSubmit={handleUpload}>
+                <label className="flex min-h-[54px] items-center justify-between rounded-3xl border border-[#c4c6cf] bg-[#f8fafc] px-4 py-3 text-sm font-medium text-[#43474e] transition hover:border-[#1960a3]">
                   <span>{selectedFile?.name ?? "Select manuscript file"}</span>
                   <input className="hidden" type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} />
                 </label>
-                <Button className="h-12 rounded-lg bg-[#1a365d] text-sm font-semibold text-white hover:bg-[#002045]" disabled={isUploading} type="submit">
-                  {isUploading ? "Uploading..." : "Upload"}
-                </Button>
+                {uploadMessage ? (
+                  <p className="text-sm font-medium text-[#1960a3]">{uploadMessage}</p>
+                ) : (
+                  <p className="text-sm leading-6 text-[#64748b]">
+                    Drag and drop is not supported yet, but you can browse your files and upload a draft quickly.
+                  </p>
+                )}
               </form>
             </CardContent>
-            {uploadMessage && (
-              <CardContent className="border-t border-[#e2e8f0] p-4">
-                <p className="text-sm font-medium text-[#1960a3]">{uploadMessage}</p>
-              </CardContent>
-            )}
           </Card>
 
-          <Card className="relative flex min-h-[600px] flex-col overflow-hidden rounded-lg border-[#c4c6cf] bg-white">
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-5">
-              <FileText className="size-32 text-[#181c1e]" />
-            </div>
-            <div className="z-10 flex items-center justify-between border-b border-[#c4c6cf] bg-[#f1f4f6] p-2">
-              <div className="flex items-center gap-1">
-                <Button className="size-8 rounded p-0 hover:bg-[#e5e9eb]" size="icon" variant="ghost">
+          <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-[#e2e8f0] p-5">
+              <div>
+                <h3 className="text-lg font-semibold text-[#181c1e]">Manuscript preview</h3>
+                <p className="text-sm text-[#64748b]">Preview the latest uploaded draft and advisor notes.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button className="size-9 rounded-full p-0 text-[#0f172a] hover:bg-[#f1f5f9]" size="icon" variant="ghost">
                   <ZoomIn className="size-4" />
                 </Button>
-                <Button className="size-8 rounded p-0 hover:bg-[#e5e9eb]" size="icon" variant="ghost">
+                <Button className="size-9 rounded-full p-0 text-[#0f172a] hover:bg-[#f1f5f9]" size="icon" variant="ghost">
                   <ZoomOut className="size-4" />
                 </Button>
-                <div className="mx-2 h-4 w-px bg-[#c4c6cf]" />
-                <span className="text-xs font-semibold leading-4">Page 1 of 42</span>
+                <Button className="h-9 gap-2 rounded-full border border-[#c4c6cf] px-3 text-xs font-semibold text-[#0f172a] hover:bg-[#f8fafc]" variant="outline">
+                  <ExternalLink className="size-3" />
+                  Fullscreen
+                </Button>
               </div>
-              <Button
-                className="h-8 gap-2 rounded-lg border-[#1960a3] px-3 text-xs font-semibold text-[#1960a3]"
-                variant="outline"
-              >
-                <ExternalLink className="size-3" />
-                Open Fullscreen
-              </Button>
             </div>
-
-            <CardContent className="flex-1 overflow-y-auto bg-white p-10">
-              <div className="mx-auto max-w-[600px] space-y-6">
-                <div className="h-8 w-3/4 animate-pulse rounded bg-[#ebeef0]" />
-                <div className="space-y-3">
-                  <SkeletonLine className="bg-[#f1f4f6]" />
-                  <SkeletonLine className="bg-[#f1f4f6]" />
-                  <SkeletonLine className="w-5/6 bg-[#f1f4f6]" />
-                </div>
-                <div className="h-6 w-1/4 rounded bg-[#ebeef0]" />
-                <div className="space-y-3">
-                  <SkeletonLine className="bg-[#f1f4f6]" />
-                  <SkeletonLine className="bg-[#f1f4f6]" />
-                  <SkeletonLine className="w-4/6 bg-[#f1f4f6]" />
-                  <SkeletonLine className="bg-[#f1f4f6]" />
-                </div>
-                <div className="rounded-r-lg border-l-4 border-[#ba1a1a] bg-[#ffdad6]/20 p-6">
-                  <p className="text-sm font-medium italic leading-5 text-[#ba1a1a]">
-                    "Please revise Chapter 2 methodology and add related studies." - Adviser
-                  </p>
-                </div>
-                <div className="space-y-3">
-                  <SkeletonLine className="bg-[#f1f4f6]" />
-                  <SkeletonLine className="w-5/6 bg-[#f1f4f6]" />
-                </div>
+            <CardContent className="min-h-[420px] p-6">
+              <div className="flex h-full flex-col items-center justify-center rounded-[2rem] border border-dashed border-[#c4c6cf] bg-[#f8fafc] text-center text-[#475569]">
+                <FileText className="mb-4 size-14 text-[#94a3b8]" />
+                <p className="text-lg font-semibold text-[#0f172a]">No manuscript selected</p>
+                <p className="mt-2 max-w-xs text-sm leading-6">
+                  Upload your latest draft to preview the first pages and advisor comments here.
+                </p>
               </div>
             </CardContent>
           </Card>
         </section>
 
-        <aside className="flex flex-col gap-3 lg:col-span-4">
-          <Card className="rounded-lg border-[#c4c6cf] bg-white">
+        <aside className="flex flex-col gap-4 lg:col-span-5">
+          <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
             <CardContent className="space-y-4 p-6">
-              <h3 className="text-sm font-bold uppercase leading-5 tracking-wider text-[#74777f]">
-                Decision Actions
-              </h3>
-              <div className="flex flex-col gap-3">
-                <Button className="h-12 w-full rounded-lg bg-[#1a365d] text-xl font-semibold text-white hover:bg-[#1a365d]/90 active:scale-[0.98]">
-                  <CheckCircle2 />
-                  Approve
-                </Button>
-                <Button
-                  className="h-12 w-full rounded-lg border-[#1960a3] text-xl font-semibold text-[#1960a3] hover:bg-[#ebeef0] active:scale-[0.98]"
-                  variant="outline"
-                >
-                  <PenLine />
-                  Request Revision
-                </Button>
+              <div className="space-y-2">
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#74777f]">Manuscript status</p>
+                <h3 className="text-xl font-semibold text-[#181c1e]">Awaiting review</h3>
+              </div>
+              <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
+                <p className="font-semibold text-[#0f172a]">Last upload</p>
+                <p className="mt-2">No file uploaded this session.</p>
+              </div>
+              <div className="grid gap-3 text-sm text-[#475569]">
+                <div className="rounded-3xl bg-[#f8fafc] p-4">
+                  <p className="font-semibold text-[#0f172a]">Next review</p>
+                  <p className="mt-1">Advisor feedback due in 2 days.</p>
+                </div>
+                <div className="rounded-3xl bg-[#f8fafc] p-4">
+                  <p className="font-semibold text-[#0f172a]">Pages</p>
+                  <p className="mt-1">42 pages in the current draft.</p>
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="flex max-h-[700px] flex-col overflow-hidden rounded-lg border-[#c4c6cf] bg-white">
-            <div className="border-b border-[#c4c6cf] p-6">
-              <h3 className="text-sm font-bold uppercase leading-5 tracking-wider text-[#74777f]">
+          <Card className="flex flex-col overflow-hidden rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
+            <div className="border-b border-[#e2e8f0] p-6">
+              <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[#74777f]">
                 Discussion Thread
               </h3>
             </div>
-
             <CardContent className="flex-1 space-y-6 overflow-y-auto p-6">
               <div className="flex gap-4">
-                <Avatar name="Sarah Thompson" className="size-10 border border-[#c4c6cf]" />
+                <Avatar name="Dr. Sarah" className="size-10 border border-[#c4c6cf]" />
                 <div className="flex-1">
                   <div className="flex items-start justify-between gap-3">
                     <p className="text-sm font-bold text-[#002045]">Dr. Sarah Thompson</p>
-                    <span className="shrink-0 text-xs font-semibold text-[#74777f]">
-                      3 hours ago
-                    </span>
+                    <span className="shrink-0 text-xs font-semibold text-[#74777f]">3 hours ago</span>
                   </div>
-                  <div className="mt-2 rounded-lg rounded-tl-none border border-[#c4c6cf] bg-[#f1f4f6] p-4">
+                  <div className="mt-2 rounded-[1.5rem] border border-[#c4c6cf] bg-[#f1f4f6] p-4">
                     <p className="text-base leading-6 text-[#181c1e]">
                       Please revise Chapter 2 methodology and add related studies. The current
                       approach lacks empirical depth for the 2024 scope.
@@ -1621,13 +1948,13 @@ function FilesScreen() {
               </div>
 
               <div className="flex flex-row-reverse gap-4">
-                <Avatar name="John Doe" className="size-10 shrink-0 bg-[#1a365d] text-white" />
+                <Avatar name="You" className="size-10 shrink-0 bg-[#1a365d] text-white" />
                 <div className="flex-1">
                   <div className="flex flex-row-reverse items-start justify-between gap-3">
-                    <p className="text-sm font-bold text-[#1960a3]">John Doe (You)</p>
+                    <p className="text-sm font-bold text-[#1960a3]">You</p>
                     <span className="text-xs font-semibold text-[#74777f]">1 hour ago</span>
                   </div>
-                  <div className="mt-2 rounded-lg rounded-tr-none border border-[#7db6ff] bg-[#7db6ff]/10 p-4">
+                  <div className="mt-2 rounded-[1.5rem] border border-[#7db6ff] bg-[#7db6ff]/10 p-4">
                     <p className="text-base leading-6 text-[#181c1e]">
                       Noted, Dr. Thompson. I will add the Smith and Wesson (2023) studies to
                       strengthen the framework.
@@ -1636,14 +1963,13 @@ function FilesScreen() {
                 </div>
               </div>
             </CardContent>
-
-            <div className="rounded-b-lg border-t border-[#c4c6cf] bg-[#f1f4f6] p-6">
+            <div className="rounded-b-3xl border-t border-[#e2e8f0] bg-[#f8fafc] p-6">
               <textarea
-                className="h-24 w-full resize-none rounded-lg border-0 border-b border-[#74777f] bg-white p-3 text-base leading-6 outline-none transition-all focus:border-[#1960a3] focus:ring-0"
+                className="h-24 w-full resize-none rounded-3xl border border-[#c4c6cf] bg-white p-4 text-base leading-6 outline-none transition-all focus:border-[#1960a3] focus:ring-0"
                 placeholder="Post a comment..."
               />
-              <div className="mt-3 flex justify-end">
-                <Button className="rounded-full bg-[#002045] px-6 text-sm font-medium text-white hover:bg-[#002045]/90">
+              <div className="mt-4 flex justify-end">
+                <Button className="h-11 rounded-full bg-[#002045] px-6 text-sm font-medium text-white hover:bg-[#002045]/90">
                   <Send className="size-4" />
                   Post Comment
                 </Button>
@@ -1657,79 +1983,142 @@ function FilesScreen() {
 }
 
 function TasksScreen() {
+  const timelineItems = [
+    {
+      title: "Research methodology review",
+      description: "Finalize research approach and validate measurement plan with your advisor.",
+      status: "Upcoming",
+      date: "Oct 24, 2023",
+      accent: "bg-[#fef3c7] text-[#92400e]",
+    },
+    {
+      title: "Database schema approval",
+      description: "Confirm the schema with your technical committee and prepare sample dataset.",
+      status: "In Progress",
+      date: "Oct 20, 2023",
+      accent: "bg-[#dbeafe] text-[#1d4ed8]",
+    },
+    {
+      title: "Chapter 1 draft complete",
+      description: "Submit the first chapter draft and collect reviewer feedback.",
+      status: "Completed",
+      date: "Oct 14, 2023",
+      accent: "bg-[#dcfce7] text-[#166534]",
+    },
+  ];
+
   return (
     <>
-      <Header />
-      <main className="relative px-4 pb-32 pt-4 md:px-8 md:pt-6">
-        <section className="mb-6">
-          <h2 className="text-2xl font-semibold leading-8 text-[#181c1e] md:text-[32px] md:leading-10">
-            Academic Roadmap
-          </h2>
-          <p className="mt-2 max-w-2xl text-base leading-6 text-[#43474e]">
-            Manage your research milestones and collaborate with your team for the Barangay
-            Emergency Response System project.
-          </p>
-        </section>
+      <Header title="Timeline" />
+      <main className="relative px-4 pb-28 pt-4 md:px-8 md:pt-6">
+        <section className="mb-6 space-y-6">
+          <div>
+            <h2 className="text-2xl font-semibold leading-8 text-[#181c1e] md:text-[32px] md:leading-10">
+              Academic Roadmap
+            </h2>
+            <p className="mt-2 max-w-2xl text-base leading-6 text-[#43474e]">
+              Track milestones, deadlines, and approvals in a structured timeline view.
+            </p>
+          </div>
 
-        <section className="grid grid-cols-1 gap-6 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
-          <TaskCard
-            assignee="Maria"
-            color="border-l-[#D97706]"
-            date="Oct 24, 2023"
-            priority="Medium"
-            status="To Do"
-            title="UI Design"
-          />
-          <TaskCard
-            assignee="Earl"
-            color="border-l-[#1960a3]"
-            date="Oct 20, 2023"
-            priority="High"
-            progress={65}
-            status="In Progress"
-            title="Database Design"
-          />
-          <TaskCard
-            assignee="John"
-            color="border-l-[#38A169]"
-            complete
-            priority="Low"
-            status="Completed"
-            title="Chapter 1 Writing"
-          />
-
-          <Card className="rounded-lg border-0 bg-[#1a365d] text-[#86a0cd] md:col-span-2">
-            <CardContent className="flex flex-col items-center gap-6 p-6 md:flex-row">
-              <div className="flex-grow">
-                <h3 className="mb-2 text-xl font-semibold leading-7">Overall Progress</h3>
-                <p className="mb-4 text-base leading-6 text-white/70">
-                  You have completed 32% of your thesis requirements. Keep up the momentum!
+          <Card className="rounded-3xl border border-[#c4c6cf] bg-white p-5 shadow-sm">
+            <CardContent className="grid gap-4 sm:grid-cols-[1.5fr_1fr] items-center">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#1960a3]">
+                  Timeline snapshot
                 </p>
-                <Progress
-                  className="h-3 bg-white/20"
-                  indicatorClassName="bg-[#74db9d]"
-                  value={32}
-                />
+                <p className="mt-2 text-lg font-semibold text-[#0f172a]">
+                  3 milestone stages due this week.
+                </p>
               </div>
-              <div className="shrink-0 rounded-lg border border-white/10 bg-white/10 p-4 text-center backdrop-blur-sm">
-                <p className="mb-1 text-xs font-semibold uppercase leading-4 tracking-wider">
-                  Upcoming Deadline
-                </p>
-                <p className="text-2xl font-semibold leading-8 text-white">4 Days Left</p>
-                <p className="text-sm font-medium leading-5 text-white/60">
-                  Chapter 2 First Draft
-                </p>
+              <div className="grid gap-2 rounded-2xl bg-[#f8fafc] p-4">
+                <div className="flex items-center justify-between text-sm text-[#475569]">
+                  <span>On track</span>
+                  <span className="font-semibold text-[#0f172a]">2</span>
+                </div>
+                <div className="flex items-center justify-between text-sm text-[#475569]">
+                  <span>Awaiting review</span>
+                  <span className="font-semibold text-[#0f172a]">1</span>
+                </div>
               </div>
             </CardContent>
           </Card>
         </section>
 
-        <Button
-          className="fixed bottom-24 right-6 z-40 size-14 rounded-full bg-[#002045] text-white shadow-lg transition-all duration-300 hover:bg-[#2d476f] active:scale-90 md:absolute md:bottom-8 md:right-8"
-          size="icon"
-        >
-          <span className="text-3xl leading-none">+</span>
-        </Button>
+        <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <Card className="rounded-3xl border border-[#c4c6cf] bg-white p-0 shadow-sm">
+            <CardContent className="p-6">
+              <div className="mb-6 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-semibold text-[#181c1e]">Milestone timeline</h3>
+                  <p className="mt-1 text-sm text-[#64748b]">
+                    Review the next steps and expected completion dates.
+                  </p>
+                </div>
+                <Button className="h-10 rounded-full bg-[#002045] px-4 text-sm font-semibold text-white hover:bg-[#1a365d]/90">
+                  Add milestone
+                </Button>
+              </div>
+
+              <div className="relative space-y-6">
+                <div className="absolute left-5 top-0 h-full w-px bg-[#c4c6cf]" />
+                {timelineItems.map((item) => (
+                  <div key={item.title} className="relative pl-10">
+                    <div className="absolute left-0 top-2 flex h-10 w-10 items-center justify-center rounded-full bg-white ring-1 ring-[#c4c6cf] shadow-sm">
+                      <span className="text-sm font-semibold text-[#0f172a]">{item.date.split(" ")[0]}</span>
+                    </div>
+                    <div className="rounded-3xl border border-[#e5e7eb] bg-[#f8fafc] p-5 shadow-sm">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${item.accent}`}>
+                          {item.status}
+                        </span>
+                        <span className="text-sm text-[#64748b]">{item.date}</span>
+                      </div>
+                      <h4 className="mt-3 text-lg font-semibold text-[#181c1e]">{item.title}</h4>
+                      <p className="mt-2 text-sm leading-6 text-[#475569]">{item.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-6">
+            <Card className="rounded-3xl border border-[#c4c6cf] bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-[#181c1e]">Overall progress</h3>
+              <p className="mt-3 text-sm text-[#475569]">
+                Keep your project moving by checking completion rates and upcoming deadlines.
+              </p>
+              <div className="mt-6 space-y-4">
+                <div>
+                  <div className="mb-2 flex items-center justify-between text-sm text-[#475569]">
+                    <span>Chapter completion</span>
+                    <span className="font-semibold text-[#0f172a]">32%</span>
+                  </div>
+                  <Progress className="h-3 bg-[#e2e8f0]" indicatorClassName="bg-[#74db9d]" value={32} />
+                </div>
+                <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
+                  <p className="font-semibold text-[#0f172a]">Next deadline</p>
+                  <p className="mt-1">Chapter 2 First Draft — 4 days left</p>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="rounded-3xl border border-[#c4c6cf] bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-[#181c1e]">Team status</h3>
+              <div className="mt-4 space-y-3 text-sm text-[#475569]">
+                <div className="rounded-2xl bg-[#f8fafc] p-4">
+                  <p className="font-semibold text-[#0f172a]">Maria</p>
+                  <p>Design milestone due in 2 days.</p>
+                </div>
+                <div className="rounded-2xl bg-[#f8fafc] p-4">
+                  <p className="font-semibold text-[#0f172a]">Earl</p>
+                  <p>Database schema under review.</p>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </section>
       </main>
     </>
   );
@@ -1851,24 +2240,35 @@ function MeetingsScreen() {
 
   return (
     <>
-      <Header />
-      <main className="grid gap-6 px-4 pb-28 pt-8 lg:grid-cols-12 md:px-8">
+      <Header title="Collaboration" />
+      <main className="grid gap-6 px-4 pb-28 pt-5 lg:grid-cols-12 md:px-8">
         <section className="space-y-6 lg:col-span-5">
-          <Card className="rounded-lg border-[#c4c6cf] bg-white shadow-sm">
+          <div>
+            <h2 className="text-2xl font-semibold leading-8 text-[#181c1e] md:text-[32px] md:leading-10">
+              Meeting & Consultations
+            </h2>
+            <p className="mt-2 max-w-2xl text-base leading-6 text-[#43474e]">
+              Schedule consultation sessions with your advisor and track all meeting history.
+            </p>
+          </div>
+
+          <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
             <CardContent className="p-6">
               <div className="mb-6 flex items-center gap-3">
-                <CalendarCheck className="size-6 text-[#002045]" />
-                <h2 className="text-xl font-semibold leading-7 text-[#181c1e]">
+                <div className="flex h-11 w-11 items-center justify-center rounded-3xl bg-[#e0f2fe] text-[#1d4ed8]">
+                  <CalendarCheck className="size-5" />
+                </div>
+                <h3 className="text-lg font-semibold text-[#0f172a]">
                   Request Consultation
-                </h2>
+                </h3>
               </div>
-              <form className="space-y-6" onSubmit={handleMeetingSubmit}>
-                <label className="block space-y-1">
-                  <span className="block text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
+              <form className="space-y-5" onSubmit={handleMeetingSubmit}>
+                <label className="block space-y-2">
+                  <span className="block text-sm font-semibold text-[#0f172a]">
                     Purpose of Meeting
                   </span>
                   <Input
-                    className="h-12 rounded-none border-0 border-b-2 border-[#c4c6cf] bg-[#f7fafc] px-2 py-3 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
+                    className="h-11 rounded-3xl border border-[#c4c6cf] bg-[#f8fafc] px-4 py-3 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
                     defaultValue="Review Chapter 3"
                     placeholder="e.g., Literature Review Feedback"
                     type="text"
@@ -1876,68 +2276,69 @@ function MeetingsScreen() {
                 </label>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <label className="block space-y-1">
-                    <span className="block text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
+                  <label className="block space-y-2">
+                    <span className="block text-sm font-semibold text-[#0f172a]">
                       Date
                     </span>
                     <div className="relative">
                       <Input
-                        className="h-12 rounded-none border-0 border-b-2 border-[#c4c6cf] bg-[#f7fafc] px-2 py-3 pr-10 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
+                        className="h-11 rounded-3xl border border-[#c4c6cf] bg-[#f8fafc] px-4 py-3 pr-10 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
                         type="date"
                       />
-                      <Calendar className="pointer-events-none absolute right-2 top-3 size-5 text-[#74777f]" />
+                      <Calendar className="pointer-events-none absolute right-3 top-3 size-5 text-[#74777f]" />
                     </div>
                   </label>
-                  <label className="block space-y-1">
-                    <span className="block text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
+                  <label className="block space-y-2">
+                    <span className="block text-sm font-semibold text-[#0f172a]">
                       Preferred Time
                     </span>
                     <div className="relative">
                       <Input
-                        className="h-12 rounded-none border-0 border-b-2 border-[#c4c6cf] bg-[#f7fafc] px-2 py-3 pr-10 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
+                        className="h-11 rounded-3xl border border-[#c4c6cf] bg-[#f8fafc] px-4 py-3 pr-10 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
                         type="time"
                       />
-                      <Clock3 className="pointer-events-none absolute right-2 top-3 size-5 text-[#74777f]" />
+                      <Clock3 className="pointer-events-none absolute right-3 top-3 size-5 text-[#74777f]" />
                     </div>
                   </label>
                 </div>
 
-                <div className="pt-4">
-                  <Button
-                    className={cn(
-                      "h-14 w-full rounded-lg text-sm font-medium text-white transition-all duration-100 active:scale-[0.98]",
-                      requestSent
-                        ? "bg-emerald-700 hover:bg-emerald-700"
-                        : "bg-[#1a365d] hover:bg-[#002045]",
-                    )}
-                    type="submit"
-                  >
-                    {requestSent ? <CheckCircle2 className="size-5" /> : <Send className="size-5" />}
-                    {requestSent ? "Request Sent" : "Submit Request"}
-                  </Button>
-                </div>
+                <Button
+                  className={cn(
+                    "h-11 w-full rounded-3xl text-sm font-semibold text-white transition-all duration-100 active:scale-[0.98]",
+                    requestSent
+                      ? "bg-emerald-600 hover:bg-emerald-600"
+                      : "bg-[#002045] hover:bg-[#1a365d]",
+                  )}
+                  type="submit"
+                >
+                  {requestSent ? <CheckCircle2 className="size-4" /> : <Send className="size-4" />}
+                  {requestSent ? "Request Sent" : "Send Request"}
+                </Button>
               </form>
             </CardContent>
           </Card>
 
-          <div className="flex gap-4 rounded-lg border border-[#d3e4ff] bg-[#a2c9ff]/20 p-4">
-            <Info className="size-5 shrink-0 text-[#1960a3]" />
-            <p className="text-sm font-medium leading-5 tracking-[0.01em] text-[#00477f]">
-              Advisors typically respond to consultation requests within 48 hours. Ensure your
-              latest draft is uploaded to the Manuscript tab before the meeting.
+          <div className="flex gap-4 rounded-3xl border border-[#dbeafe] bg-[#f0f9ff] p-5 text-sm text-[#0369a1]">
+            <Info className="size-5 shrink-0 flex-shrink-0" />
+            <p className="leading-6">
+              Advisors typically respond within 48 hours. Ensure your latest manuscript draft is
+              uploaded before the scheduled meeting.
             </p>
           </div>
         </section>
 
         <section className="lg:col-span-7">
-          <Card className="overflow-hidden rounded-lg border-[#c4c6cf] bg-white">
-            <div className="flex items-center justify-between border-b border-[#c4c6cf] px-6 py-5">
-              <h2 className="text-xl font-semibold leading-7 text-[#181c1e]">Meeting History</h2>
-              <button className="text-sm font-medium leading-5 tracking-[0.01em] text-[#1960a3] hover:underline">
+          <Card className="overflow-hidden rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-[#e2e8f0] px-6 py-5">
+              <div>
+                <h3 className="text-lg font-semibold text-[#181c1e]">Meeting History</h3>
+                <p className="text-sm text-[#64748b]">Track past and upcoming sessions.</p>
+              </div>
+              <button className="rounded-full bg-[#f8fafc] px-4 py-2 text-sm font-semibold text-[#1960a3] transition hover:bg-[#ebeef0]">
                 View All
               </button>
             </div>
-            <CardContent className="divide-y divide-[#c4c6cf] p-0">
+            <CardContent className="divide-y divide-[#e2e8f0] p-0">
               {meetings.map((item) => (
                 <MeetingRow key={item.title} item={item} />
               ))}
@@ -1954,46 +2355,41 @@ function MeetingRow({ item }: { item: (typeof meetings)[number] }) {
   const config = {
     Approved: {
       border: "border-l-[#2B6CB0]",
-      icon: "text-[#1960a3]",
       badge: "bg-[#1960a3]/10 text-[#1960a3]",
     },
     Completed: {
       border: "border-l-[#38A169]",
-      icon: "text-[#003f23]",
-      badge: "bg-[#4bb278]/10 text-[#00522f]",
+      badge: "bg-[#38A169]/10 text-[#003f23]",
     },
     Pending: {
       border: "border-l-[#D97706]",
-      icon: "text-[#93000a]",
-      badge: "bg-[#ffdad6] text-[#93000a]",
+      badge: "bg-[#fcd34d]/20 text-[#92400e]",
     },
   }[item.status];
 
   return (
     <div
       className={cn(
-        "flex flex-col justify-between gap-4 border-l-4 p-6 transition-colors hover:bg-[#f1f4f6] md:flex-row md:items-center",
+        "flex flex-col justify-between gap-4 border-l-4 px-6 py-5 transition-colors hover:bg-[#f8fafc] md:flex-row md:items-center md:gap-6",
         config.border,
       )}
     >
-      <div className="flex items-start gap-4">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-[#e5e9eb]">
-          <Icon className={cn("size-6", config.icon)} />
+      <div className="flex items-start gap-4 flex-1">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-3xl bg-[#f1f5f9] text-[#0f172a]">
+          <Icon className="size-5" />
         </div>
-        <div>
-          <h3 className="text-lg font-semibold leading-7 text-[#181c1e]">{item.title}</h3>
-          <p className="text-base leading-6 text-[#43474e]">{item.date}</p>
-          <p className="mt-2 flex items-center gap-2 text-xs font-semibold leading-4 tracking-[0.05em] text-[#74777f]">
+        <div className="min-w-0">
+          <h4 className="text-lg font-semibold leading-6 text-[#0f172a]">{item.title}</h4>
+          <p className="mt-1 text-sm leading-5 text-[#475569]">{item.date}</p>
+          <p className="mt-2 flex items-center gap-2 text-xs font-semibold text-[#64748b]">
             <Building2 className="size-4" />
             {item.person}
           </p>
         </div>
       </div>
-      <div className="flex items-center">
-        <Badge className={cn("rounded-full px-3 py-1 text-xs font-semibold", config.badge)}>
-          {item.status}
-        </Badge>
-      </div>
+      <Badge className={cn("rounded-full px-3 py-1 text-xs font-semibold shrink-0", config.badge)}>
+        {item.status}
+      </Badge>
     </div>
   );
 }
@@ -2006,7 +2402,7 @@ function BottomNav({
   onChange: (screen: Screen) => void;
 }) {
   return (
-    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-[430px] -translate-x-1/2 border-t border-[#e2e8f0] bg-white/95 px-3 py-2 backdrop-blur-md shadow-[0_-2px_18px_rgba(15,23,42,0.08)]">
+    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-[430px] -translate-x-1/2 border-t border-[#e2e8f0] bg-white/95 px-3 py-2 backdrop-blur-md shadow-[0_-2px_18px_rgba(15,23,42,0.08)] md:hidden">
       <div className="grid grid-cols-4 gap-2">
         {navItems.map((item) => {
           const Icon = item.icon;
