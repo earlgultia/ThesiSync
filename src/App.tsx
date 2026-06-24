@@ -27,7 +27,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,9 +41,9 @@ type Screen = "landing" | "login" | "register" | "dashboard" | "tasks" | "files"
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: Grid2X2 },
-  { id: "tasks", label: "Tasks", icon: ClipboardList },
-  { id: "files", label: "Files", icon: FolderOpen },
-  { id: "meetings", label: "Meetings", icon: Calendar },
+  { id: "tasks", label: "Timeline", icon: ClipboardList },
+  { id: "files", label: "Manuscript", icon: FileText },
+  { id: "meetings", label: "Collaboration", icon: MessageSquare },
 ] as const;
 
 const meetings = [
@@ -71,7 +71,7 @@ const meetings = [
 ] as const;
 
 function App() {
-  const [screen, setScreen] = useState<Screen>("landing");
+  const [screen, setScreen] = useState<Screen>("dashboard");
 
   if (screen === "landing") {
     return (
@@ -103,7 +103,7 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <MobileFrame>
-        {screen === "dashboard" && <DashboardScreen />}
+        {screen === "dashboard" && <DashboardScreen onNavigate={setScreen} />}
         {screen === "tasks" && <TasksScreen />}
         {screen === "files" && <FilesScreen />}
         {screen === "meetings" && <MeetingsScreen />}
@@ -123,42 +123,42 @@ function MobileFrame({ children }: { children: React.ReactNode }) {
 
 function Header({
   compact,
-  title = "ThesiSync",
+  title = "Dissertation Hub",
+  userName,
 }: {
   compact?: boolean;
   title?: string;
+  userName?: string;
 }) {
   return (
-    <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-slate-300 bg-white px-5">
+    <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-[#c4c6cf] bg-[#f7fafc] px-5 backdrop-blur-sm">
       <div className="flex min-w-0 items-center gap-3">
         {compact ? (
-          <Menu className="size-5 shrink-0" />
+          <Menu className="size-5 shrink-0 text-[#0f172a]" />
         ) : (
-          <img
-            alt=""
-            className="size-10 rounded-xl object-cover ring-1 ring-slate-200"
-            src="https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=120&q=80"
-          />
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e2e8f0] ring-1 ring-[#c4c6cf] text-[#0f172a]">
+            <span className="font-bold">D</span>
+          </div>
         )}
         <h1
           className={cn(
-            "truncate font-extrabold leading-tight text-navy",
-            compact ? "text-base" : "text-2xl",
+            "truncate font-bold leading-tight text-[#0f172a]",
+            compact ? "text-base" : "text-xl",
           )}
         >
           {title}
         </h1>
       </div>
       <div className="flex items-center gap-4">
-        <Bell className="size-5 text-navy" />
+        <button className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ffffff] text-[#0f172a] shadow-sm transition hover:bg-[#e2e8f0]">
+          <Bell className="size-5" />
+        </button>
         {compact ? (
-          <Avatar name="John Doe" className="size-8 bg-navy text-white" />
+          <Avatar name={userName ?? "User"} className="size-8 bg-[#0f172a] text-white" />
+        ) : userName ? (
+          <Avatar name={userName} className="hidden size-12 bg-[#0f172a] text-white min-[390px]:flex" />
         ) : (
-          <img
-            alt=""
-            className="hidden size-12 rounded-xl object-cover ring-1 ring-slate-200 min-[390px]:block"
-            src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80"
-          />
+          <div className="hidden h-12 w-12 rounded-full bg-[#e2e8f0] ring-1 ring-[#c4c6cf] min-[390px]:flex" />
         )}
       </div>
     </header>
@@ -692,135 +692,732 @@ function RegisterScreen({
   );
 }
 
-function DashboardScreen() {
+type DatabaseRecord = Record<string, unknown>;
+
+type DashboardProject = {
+  id: string;
+  title: string;
+  description: string;
+  progress: number | null;
+};
+
+type DashboardMilestone = {
+  id: string;
+  title: string;
+  subtitle: string;
+  status: string;
+  active: boolean;
+};
+
+type DashboardDeadline = {
+  id: string;
+  title: string;
+  description: string;
+  dueDate: Date;
+  daysLeft: number;
+};
+
+type DashboardFeedback = {
+  id: string;
+  message: string;
+  author: string;
+};
+
+type DashboardData = {
+  userName: string;
+  project: DashboardProject | null;
+  milestones: DashboardMilestone[];
+  deadlines: DashboardDeadline[];
+  feedback: DashboardFeedback | null;
+};
+
+type DashboardLoadState =
+  | { status: "loading" }
+  | { status: "ready"; data: DashboardData }
+  | { status: "empty"; message: string; userId?: string; userName?: string }
+  | { status: "error"; message: string };
+
+function getString(row: DatabaseRecord, keys: string[], fallback = "") {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return fallback;
+}
+
+function getNumber(row: DatabaseRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+      return Number(value);
+    }
+  }
+
+  return null;
+}
+
+function getDate(row: DatabaseRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value !== "string" || !value.trim()) {
+      continue;
+    }
+
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
+  }
+
+  return null;
+}
+
+function asRecord(value: unknown): DatabaseRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as DatabaseRecord;
+}
+
+function formatRelativeDate(date: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function getDaysLeft(date: Date) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(date);
+  due.setHours(0, 0, 0, 0);
+
+  return Math.ceil((due.getTime() - today.getTime()) / 86_400_000);
+}
+
+function normalizeProject(row: DatabaseRecord): DashboardProject {
+  const id = getString(row, ["id"]);
+
+  return {
+    id,
+    title: getString(row, ["title", "name", "project_title"], "Untitled thesis project"),
+    description: getString(row, ["description", "abstract", "summary"]),
+    progress: getNumber(row, ["progress", "progress_percent", "completion", "completion_percentage"]),
+  };
+}
+
+function normalizeMilestone(row: DatabaseRecord, index: number): DashboardMilestone {
+  const status = getString(row, ["status", "state"], "Pending");
+  const progress = getNumber(row, ["progress", "progress_percent", "completion"]);
+
+  return {
+    id: getString(row, ["id"], `milestone-${index}`),
+    title: getString(row, ["title", "name"], "Untitled milestone"),
+    subtitle: getString(row, ["subtitle", "description", "notes"]),
+    status,
+    active:
+      ["ongoing", "in progress", "active"].includes(status.toLowerCase()) ||
+      (progress !== null && progress > 0 && progress < 100),
+  };
+}
+
+function normalizeTaskAsMilestone(row: DatabaseRecord, index: number): DashboardMilestone {
+  const status = getString(row, ["status", "state"], "Pending");
+
+  return {
+    id: getString(row, ["id"], `task-milestone-${index}`),
+    title: getString(row, ["title", "name"], "Untitled task"),
+    subtitle: getString(row, ["description", "notes", "assignee"]),
+    status,
+    active: ["ongoing", "in progress", "active"].includes(status.toLowerCase()),
+  };
+}
+
+function normalizeDeadline(row: DatabaseRecord, index: number): DashboardDeadline | null {
+  const dueDate = getDate(row, ["due_date", "deadline", "target_date", "scheduled_at"]);
+
+  if (!dueDate) {
+    return null;
+  }
+
+  return {
+    id: getString(row, ["id"], `deadline-${index}`),
+    title: getString(row, ["title", "name"], "Untitled deadline"),
+    description: getString(row, ["description", "notes"]),
+    dueDate,
+    daysLeft: getDaysLeft(dueDate),
+  };
+}
+
+function normalizeFeedback(row: DatabaseRecord): DashboardFeedback {
+  return {
+    id: getString(row, ["id"], "latest-feedback"),
+    message: getString(row, ["message", "comment", "content", "body"], "No feedback text available."),
+    author: getString(row, ["author_name", "reviewer_name", "created_by_name"], "Adviser"),
+  };
+}
+
+function deriveProgress(project: DashboardProject, taskRows: DatabaseRecord[]) {
+  if (project.progress !== null) {
+    return Math.round(Math.min(100, Math.max(0, project.progress)));
+  }
+
+  if (!taskRows.length) {
+    return 0;
+  }
+
+  const completed = taskRows.filter((task) =>
+    ["done", "complete", "completed"].includes(getString(task, ["status", "state"]).toLowerCase()),
+  ).length;
+
+  return Math.round((completed / taskRows.length) * 100);
+}
+
+async function createProjectForUser(
+  userId: string,
+  title: string,
+  description: string,
+): Promise<DashboardProject | null> {
+  const result = await supabase
+    .from("thesis_projects")
+    .insert({
+      title,
+      description,
+      owner_id: userId,
+      created_by: userId,
+      student_id: userId,
+    })
+    .select("*")
+    .maybeSingle();
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  const project = asRecord(result.data);
+  return project ? normalizeProject(project) : null;
+}
+
+async function fetchFirstProjectForUser(userId: string) {
+  const membershipResult = await supabase
+    .from("group_members")
+    .select("groups(project_id, thesis_projects(*))")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!membershipResult.error) {
+    const membership = asRecord(membershipResult.data);
+    const group = asRecord(membership?.groups);
+    const projectFromGroup = asRecord(group?.thesis_projects);
+
+    if (projectFromGroup) {
+      return normalizeProject(projectFromGroup);
+    }
+
+    const projectId = getString(group ?? {}, ["project_id"]);
+    if (projectId) {
+      const projectResult = await supabase
+        .from("thesis_projects")
+        .select("*")
+        .eq("id", projectId)
+        .maybeSingle();
+
+      if (projectResult.error) {
+        throw projectResult.error;
+      }
+
+      const project = asRecord(projectResult.data);
+      return project ? normalizeProject(project) : null;
+    }
+  }
+
+  const ownProjectResult = await supabase
+    .from("thesis_projects")
+    .select("*")
+    .or(`owner_id.eq.${userId},created_by.eq.${userId},student_id.eq.${userId}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (ownProjectResult.error) {
+    throw ownProjectResult.error;
+  }
+
+  const ownProject = asRecord(ownProjectResult.data);
+  return ownProject ? normalizeProject(ownProject) : null;
+}
+
+async function fetchProjectRows(
+  table: string,
+  projectId: string,
+  orderColumn: string,
+): Promise<DatabaseRecord[]> {
+  const result = await supabase
+    .from(table)
+    .select("*")
+    .eq("project_id", projectId)
+    .order(orderColumn, { ascending: true });
+
+  if (result.error) {
+    return [];
+  }
+
+  if (!Array.isArray(result.data)) {
+    return [];
+  }
+
+  const rows: DatabaseRecord[] = [];
+  for (const row of result.data) {
+    const record = asRecord(row);
+    if (record) {
+      rows.push(record);
+    }
+  }
+
+  return rows;
+}
+
+async function fetchLatestFeedback(projectId: string): Promise<DashboardFeedback | null> {
+  for (const table of ["feedback", "comments", "reviews"]) {
+    const result = await supabase
+      .from(table)
+      .select("*")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!result.error) {
+      const row = asRecord(result.data);
+      if (row) {
+        return normalizeFeedback(row);
+      }
+    }
+  }
+
+  return null;
+}
+
+async function loadDashboardData(): Promise<DashboardLoadState> {
+  if (!isSupabaseConfigured) {
+    return {
+      status: "error",
+      message: "Supabase is not configured. Please add your Supabase keys in .env.",
+    };
+  }
+
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+
+  if (userError) {
+    return { status: "error", message: userError.message };
+  }
+
+  if (!userData.user) {
+    return {
+      status: "empty",
+      message: "You are not signed in. Please sign in to view your dashboard.",
+    };
+  }
+
+  const userName = getString(
+    asRecord(userData.user.user_metadata) ?? {},
+    ["full_name", "name"],
+    userData.user.email ?? "User",
+  );
+
+  const project = await fetchFirstProjectForUser(userData.user.id);
+
+  if (!project) {
+    return {
+      status: "empty",
+      message: "No thesis project was found. Create a project to populate your dashboard.",
+      userId: userData.user.id,
+      userName,
+    };
+  }
+
+  const taskRows = await fetchProjectRows("tasks", project.id, "due_date");
+  const milestoneRows = await fetchProjectRows("milestones", project.id, "created_at");
+  const feedback = await fetchLatestFeedback(project.id);
+  const progress = deriveProgress(project, taskRows);
+  const milestones = (milestoneRows.length ? milestoneRows : taskRows)
+    .slice(0, 2)
+    .map((row, index) =>
+      milestoneRows.length ? normalizeMilestone(row, index) : normalizeTaskAsMilestone(row, index),
+    );
+  const deadlines = taskRows
+    .map(normalizeDeadline)
+    .filter((deadline): deadline is DashboardDeadline => Boolean(deadline))
+    .filter((deadline) => deadline.daysLeft >= 0)
+    .sort((first, second) => first.dueDate.getTime() - second.dueDate.getTime())
+    .slice(0, 2);
+
+  return {
+    status: "ready",
+    data: {
+      userName: getString(
+        asRecord(userData.user.user_metadata) ?? {},
+        ["full_name", "name"],
+        userData.user.email ?? "User",
+      ),
+      project: { ...project, progress },
+      milestones,
+      deadlines,
+      feedback,
+    },
+  };
+}
+
+function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+  const [dashboardState, setDashboardState] = useState<DashboardLoadState>({ status: "loading" });
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [projectMessage, setProjectMessage] = useState("");
+
+  async function handleCreateProject() {
+    if (dashboardState.status !== "empty" || !dashboardState.userId) {
+      return;
+    }
+
+    setIsCreatingProject(true);
+    setProjectMessage("");
+
+    try {
+      const project = await createProjectForUser(
+        dashboardState.userId,
+        `${dashboardState.userName ?? "Thesis"} Project`,
+        "A new thesis project created from your dashboard.",
+      );
+
+      if (!project) {
+        setProjectMessage("Unable to create a project right now.");
+        return;
+      }
+
+      const refreshed = await loadDashboardData();
+      setDashboardState(refreshed);
+    } catch (error: unknown) {
+      setProjectMessage(error instanceof Error ? error.message : "Unable to create a project.");
+    } finally {
+      setIsCreatingProject(false);
+    }
+  }
+
+  useEffect(() => {
+    let isMounted = true;
+
+    loadDashboardData()
+      .then((state) => {
+        if (isMounted) {
+          setDashboardState(state);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isMounted) {
+          setDashboardState({
+            status: "error",
+            message: error instanceof Error ? error.message : "Unable to load dashboard data.",
+          });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  if (dashboardState.status === "loading") {
+    return (
+      <>
+        <Header />
+        <main className="grid gap-6 px-4 pb-28 pt-6 md:grid-cols-[1fr_320px] md:px-8">
+          <DashboardNotice title="Loading dashboard" message="Fetching your live thesis data." />
+        </main>
+      </>
+    );
+  }
+
+  if (dashboardState.status === "empty" || dashboardState.status === "error") {
+    return (
+      <>
+        <Header />
+        <main className="grid gap-6 px-4 pb-28 pt-6 md:grid-cols-[1fr_320px] md:px-8">
+          <DashboardNotice
+            title={dashboardState.status === "error" ? "Dashboard unavailable" : "No dashboard data"}
+            message={dashboardState.message}
+          />
+          {dashboardState.status === "empty" && (
+            <Card className="rounded-lg border-[#c4c6cf] bg-white shadow-sm">
+              <CardContent className="space-y-4 p-6">
+                <div>
+                  <h3 className="text-lg font-semibold leading-7 text-[#002045]">Get the dashboard moving</h3>
+                  <p className="mt-2 text-sm leading-6 text-[#43474e]">
+                    Create a project and upload your first manuscript to populate the dashboard with milestones, deadlines, and feedback.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Button
+                    className="h-12 rounded-lg bg-[#1a365d] text-sm font-semibold text-white hover:bg-[#002045]"
+                    disabled={isCreatingProject || !dashboardState.userId}
+                    onClick={handleCreateProject}
+                  >
+                    {isCreatingProject ? "Creating project..." : "Create Project"}
+                  </Button>
+                  <Button
+                    className="h-12 rounded-lg border-[#1960a3] text-sm font-semibold text-[#1960a3] hover:bg-[#ebeef0]"
+                    onClick={() => onNavigate("files")}
+                    variant="outline"
+                  >
+                    Open Manuscripts
+                  </Button>
+                </div>
+                {projectMessage ? (
+                  <p className="text-sm font-medium text-red-700">{projectMessage}</p>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+        </main>
+      </>
+    );
+  }
+
+  const { project, milestones, deadlines, feedback } = dashboardState.data;
+  const progress = project?.progress ?? 65;
+  const primaryDeadline = deadlines[0];
+
   return (
     <>
-      <Header />
-      <main className="grid gap-6 px-4 pb-28 pt-6 md:grid-cols-[1fr_320px] md:px-8">
-        <section className="space-y-6">
-          <Card className="rounded-lg border-[#c4c6cf] bg-white transition-colors hover:border-[#1960a3]">
-            <CardContent className="p-6">
-              <div className="flex flex-col gap-2">
-                <span className="text-xs font-semibold uppercase leading-4 tracking-[0.18em] text-[#1960a3]">
-                  Active Thesis Project
-                </span>
-                <h2 className="text-3xl font-semibold leading-10 tracking-normal text-[#002045] md:text-[32px]">
-                  Barangay Emergency Response System
-                </h2>
-                <p className="max-w-2xl text-base leading-6 text-[#43474e]">
-                  A centralized platform designed to optimize communication and resource
-                  allocation during local emergencies in suburban barangays.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <Card className="rounded-lg border-[#c4c6cf] bg-white transition-colors hover:border-[#1960a3]">
-              <CardContent className="flex flex-col items-center justify-center p-6 text-center">
-                <h3 className="mb-3 text-xl font-semibold leading-7 text-[#002045]">
-                  Total Progress
-                </h3>
-                <div
-                  className="relative flex size-40 items-center justify-center rounded-full transition-transform duration-300 hover:scale-105"
-                  style={{
-                    background:
-                      "radial-gradient(closest-side, white 79%, transparent 80% 100%), conic-gradient(#38A169 65%, #EDF2F7 0)",
-                  }}
-                >
-                  <div className="flex flex-col">
-                    <span className="text-5xl font-bold leading-[56px] text-[#002045]">
-                      65%
-                    </span>
-                    <span className="text-xs font-semibold uppercase leading-4 tracking-[0.05em] text-[#43474e]">
-                      Complete
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-6 flex gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="size-3 rounded-full bg-[#38A169]" />
-                    <span className="text-sm font-medium text-[#43474e]">Current</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="size-3 rounded-full bg-[#EDF2F7]" />
-                    <span className="text-sm font-medium text-[#43474e]">Remaining</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-lg border-[#c4c6cf] bg-white transition-colors hover:border-[#1960a3]">
-              <CardContent className="flex h-full flex-col gap-4 p-6">
-                <h3 className="text-xl font-semibold leading-7 text-[#002045]">
-                  Current Milestones
-                </h3>
-                <Milestone
-                  active
-                  status="Ongoing"
-                  subtitle="Literature Review Synthesis"
-                  title="Chapter 2 Finished"
-                />
-                <Milestone
-                  status="Pending"
-                  subtitle="MVP Architecture Phase"
-                  title="System Development"
-                />
-                <button className="mt-auto flex items-center gap-1 text-left text-sm font-medium text-[#1960a3] hover:underline">
-                  View full roadmap
-                  <ArrowRight className="size-[18px]" />
-                </button>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-
-        <aside className="space-y-6">
-          <Card className="overflow-hidden rounded-lg border-[#c4c6cf] bg-white shadow-sm transition-colors hover:border-[#1960a3]">
-            <div className="flex items-center justify-between border-b border-[#c4c6cf] bg-red-50 px-4 py-4">
-              <h3 className="text-xl font-semibold leading-7 text-[#002045]">Deadlines</h3>
-              <Calendar className="size-5 text-red-700" />
+      <header className="w-full sticky top-0 z-40 bg-[#f7fafc] border-b border-[#e0e3e5]">
+        <div className="mx-auto flex max-w-[1280px] items-center justify-between px-4 py-4 md:px-8">
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 overflow-hidden rounded-full bg-[#f1f4f6] border border-[#e0e3e5]">
+              <Avatar name={dashboardState.data.userName ?? "Student"} className="h-full w-full" />
             </div>
-            <CardContent className="space-y-4 p-4">
-              <div className="rounded-lg border border-l-4 border-[#c4c6cf] border-l-[#ffb000] bg-[#ebeef0] p-4">
-                <Badge className="bg-[#ffb000]/10 text-[#856404] hover:bg-[#ffb000]/10">
-                  3 Days Left
-                </Badge>
-                <h4 className="mt-3 text-sm font-medium text-[#002045]">Chapter 2 Draft</h4>
-                <p className="mt-1 text-xs font-semibold leading-4 text-[#43474e]">
-                  Final submission of Literature Review for Advisor check.
-                </p>
-                <Button className="mt-4 h-10 w-full rounded bg-[#002045] text-sm font-medium text-white hover:bg-[#002045]/90">
-                  Upload Manuscript
-                </Button>
-              </div>
-              <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-[#c4c6cf] p-4">
-                <span className="text-xs font-semibold leading-4 tracking-[0.05em] text-[#74777f]">
-                  No other urgent tasks
-                </span>
-              </div>
-            </CardContent>
-          </Card>
+            <h1 className="text-xl font-semibold text-[#002045]">Dissertation Hub</h1>
+          </div>
+          <button className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#002045] shadow-sm transition hover:bg-[#e2e8f0]" type="button">
+            <Bell className="size-5" />
+          </button>
+        </div>
+      </header>
 
-          <Card className="rounded-lg border-[#c4c6cf] bg-white transition-colors hover:border-[#1960a3]">
-            <CardContent className="p-4">
-              <h3 className="mb-3 text-sm font-medium text-[#002045]">Advisor Feedback</h3>
-              <div className="flex items-start gap-3 rounded-lg bg-[#f1f4f6] p-3">
-                <MessageSquare className="mt-0.5 size-5 text-[#1960a3]" />
-                <div>
-                  <p className="text-xs font-semibold italic leading-4 text-[#181c1e]">
-                    "Focus on the data privacy section for Barangay officials."
-                  </p>
-                  <p className="mt-1 text-xs font-semibold leading-4 text-[#43474e]">
-                    - Dr. Elena Cruz
-                  </p>
+      <main className="flex min-h-[calc(100vh-76px)] flex-col gap-6 bg-[#f7fafc] px-4 py-6 md:flex-row md:px-8">
+        <div className="flex-1 space-y-6">
+          <section className="rounded-3xl border border-[#e0e3e5] bg-white p-6">
+            <div className="flex flex-col gap-2">
+              <span className="text-xs uppercase tracking-[0.16em] font-semibold text-[#1960a3]">Active Thesis Project</span>
+              <h2 className="text-3xl font-semibold text-[#002045]">{project?.title}</h2>
+              <p className="text-sm leading-6 text-[#475569] max-w-2xl">
+                {project?.description || "A centralized platform designed to optimize communication and resource allocation during local emergencies in suburban barangays."}
+              </p>
+            </div>
+          </section>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <section className="rounded-3xl border border-[#e0e3e5] bg-white p-6 text-center">
+              <h3 className="text-lg font-semibold text-[#002045] mb-6">Total Progress</h3>
+              <div
+                className="relative mx-auto flex h-40 w-40 items-center justify-center rounded-full"
+                style={{
+                  background: `radial-gradient(closest-side, white 79%, transparent 80% 100%), conic-gradient(#38A169 ${progress}%, #EDF2F7 0)`,
+                }}
+              >
+                <div className="flex flex-col items-center">
+                  <span className="text-5xl font-bold text-[#002045]">{progress}%</span>
+                  <span className="text-xs uppercase tracking-[0.22em] text-[#64748b]">Complete</span>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+              <div className="mt-6 flex justify-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-full bg-[#38A169]" />
+                  <span className="text-sm font-medium text-[#475569]">Current</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="h-3 w-3 rounded-full bg-[#EDF2F7]" />
+                  <span className="text-sm font-medium text-[#475569]">Remaining</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-[#e0e3e5] bg-white p-6 flex flex-col gap-4">
+              <h3 className="text-lg font-semibold text-[#002045]">Current Milestones</h3>
+              {milestones.length ? (
+                <>
+                  {milestones.slice(0, 2).map((milestone) => (
+                    <div
+                      key={milestone.id}
+                      className="flex items-center gap-4 rounded-3xl border-l-4 border-[#1960a3] bg-[#eff6ff] p-4"
+                    >
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-semibold text-[#002045]">{milestone.title}</h4>
+                        <p className="text-xs text-[#475569]">{milestone.subtitle || "Milestone details"}</p>
+                      </div>
+                      <span className="rounded-full bg-[#dbeafe] px-2 py-1 text-[11px] font-semibold text-[#1960a3]">
+                        {milestone.status}
+                      </span>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <DashboardEmptyLine message="No current milestones available." />
+              )}
+              <button
+                className="mt-auto inline-flex items-center gap-1 text-sm font-semibold text-[#1960a3] hover:underline"
+                type="button"
+                onClick={() => onNavigate("tasks")}
+              >
+                <span>View full roadmap</span>
+                <ArrowRight className="size-4" />
+              </button>
+            </section>
+          </div>
+        </div>
+
+        <aside className="w-full md:w-80 space-y-6">
+          <div className="rounded-3xl border border-[#e0e3e5] bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between bg-[#ffdad6]/10 border-b border-[#e0e3e5] p-4">
+              <h3 className="text-lg font-semibold text-[#002045]">Deadlines</h3>
+              <Calendar className="size-5 text-[#ba1a1a]" />
+            </div>
+            <div className="space-y-4 p-4">
+              {primaryDeadline ? (
+                <div className="rounded-3xl border border-[#e0e3e5] border-l-4 border-[#ffb000] bg-[#f1f4f6] p-4">
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <span className="rounded-full bg-[#ffb000]/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#856404]">
+                      {primaryDeadline.daysLeft === 0
+                        ? "Due Today"
+                        : primaryDeadline.daysLeft === 1
+                          ? "1 Day Left"
+                          : `${primaryDeadline.daysLeft} Days Left`}
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-semibold text-[#002045]">{primaryDeadline.title}</h4>
+                  <p className="mt-2 text-xs text-[#475569]">{primaryDeadline.description || "Final submission of Literature Review for Advisor check."}</p>
+                  <Button
+                    className="mt-4 w-full rounded-2xl bg-[#002045] py-2 text-sm font-semibold text-white hover:bg-[#1a365d]"
+                    onClick={() => onNavigate("files")}
+                  >
+                    Upload Manuscript
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center rounded-3xl border-2 border-dashed border-[#c4c6cf] p-4">
+                  <span className="text-xs font-semibold uppercase tracking-[0.05em] text-[#74777f]">No other urgent tasks</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-[#e0e3e5] bg-white p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-[#475569] mb-3">Advisor Feedback</h3>
+            {feedback ? (
+              <div className="flex items-start gap-3 rounded-3xl bg-[#f1f4f6] p-3">
+                <span className="text-[#1960a3]">💬</span>
+                <div>
+                  <p className="text-sm italic text-[#181c1e]">“{feedback.message}”</p>
+                  <p className="mt-2 text-xs text-[#475569]">— {feedback.author}</p>
+                </div>
+              </div>
+            ) : (
+              <DashboardEmptyLine message="No advisor feedback found." />
+            )}
+          </div>
         </aside>
       </main>
+      <div className="h-20 md:hidden" />
     </>
+  );
+}
+
+function DashboardStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 px-3 py-4 text-center">
+      <p className="truncate text-2xl font-bold leading-8 text-[#002045]">{value}</p>
+      <p className="mt-1 truncate text-[11px] font-bold uppercase leading-4 tracking-[0.08em] text-[#74777f]">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function DashboardNotice({ title, message }: { title: string; message: string }) {
+  return (
+    <Card className="rounded-lg border-[#c4c6cf] bg-white shadow-sm md:col-span-2">
+      <CardContent className="flex min-h-[220px] flex-col items-center justify-center p-6 text-center">
+        <div className="mb-4 flex size-12 items-center justify-center rounded-lg bg-[#f1f4f6] text-[#1960a3]">
+          <Info className="size-6" />
+        </div>
+        <h2 className="text-xl font-semibold leading-7 text-[#002045]">{title}</h2>
+        <p className="mt-2 max-w-md text-sm font-medium leading-5 text-[#43474e]">{message}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DashboardEmptyLine({ message }: { message: string }) {
+  return (
+    <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-[#c4c6cf] p-4">
+      <span className="text-center text-xs font-semibold leading-4 tracking-[0.05em] text-[#74777f]">
+        {message}
+      </span>
+    </div>
+  );
+}
+
+function DeadlineCard({
+  deadline,
+  onNavigate,
+}: {
+  deadline: DashboardDeadline;
+  onNavigate: (screen: Screen) => void;
+}) {
+  const dateLabel =
+    deadline.daysLeft === 0
+      ? "Due Today"
+      : deadline.daysLeft === 1
+        ? "1 Day Left"
+        : `${deadline.daysLeft} Days Left`;
+
+  return (
+    <div className="rounded-lg border border-l-4 border-[#d7dde3] border-l-[#ffb000] bg-white p-4 shadow-sm">
+      <Badge className="bg-[#ffb000]/10 text-[#856404] hover:bg-[#ffb000]/10">
+        {dateLabel}
+      </Badge>
+      <h4 className="mt-3 text-sm font-bold leading-5 text-[#002045]">{deadline.title}</h4>
+      <p className="mt-1 text-xs font-semibold leading-4 text-[#43474e] break-words">
+        {deadline.description || `Due ${formatRelativeDate(deadline.dueDate)}`}
+      </p>
+      <Button
+        className="mt-4 h-10 w-full rounded bg-[#002045] text-sm font-medium text-white hover:bg-[#002045]/90"
+        onClick={() => onNavigate("files")}
+      >
+        Upload Manuscript
+      </Button>
+    </div>
+  );
+}
+
+function FeedbackCard({ feedback }: { feedback: DashboardFeedback }) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-[#d7dde3] bg-[#f7fafc] p-3">
+      <MessageSquare className="mt-0.5 size-5 shrink-0 text-[#1960a3]" />
+      <div className="min-w-0">
+        <p className="break-words text-sm font-semibold italic leading-5 text-[#181c1e]">
+          "{feedback.message}"
+        </p>
+        <p className="mt-1 text-xs font-semibold leading-4 text-[#43474e]">
+          - {feedback.author}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -838,15 +1435,22 @@ function Milestone({
   return (
     <div
       className={cn(
-        "flex items-center justify-between rounded bg-slate-100 px-5 py-4",
-        active ? "border-l-4 border-blue-700" : "border-l-4 border-slate-300",
+        "flex items-start justify-between gap-3 rounded-lg border border-l-4 bg-[#f7fafc] px-4 py-3",
+        active ? "border-[#d7dde3] border-l-[#1960a3]" : "border-[#d7dde3] border-l-[#a7b0ba]",
       )}
     >
-      <div>
-        <p className="font-extrabold text-navy">{title}</p>
-        <p className="font-bold text-slate-600">{subtitle}</p>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-bold leading-5 text-[#002045]">{title}</p>
+        <p className="mt-1 truncate text-xs font-semibold leading-4 text-[#43474e]">
+          {subtitle || "No description"}
+        </p>
       </div>
-      <Badge className={cn(active ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-600")}>
+      <Badge
+        className={cn(
+          "shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold",
+          active ? "bg-[#1960a3]/10 text-[#1960a3]" : "bg-[#e7ecf1] text-[#43474e]",
+        )}
+      >
         {status}
       </Badge>
     </div>
@@ -854,6 +1458,32 @@ function Milestone({
 }
 
 function FilesScreen() {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    setUploadMessage("");
+    const file = event.target.files?.[0] ?? null;
+    setSelectedFile(file);
+  }
+
+  async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedFile) {
+      setUploadMessage("Please select a manuscript file before uploading.");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadMessage("");
+
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    setUploadMessage(`Uploaded ${selectedFile.name}.`);
+    setIsUploading(false);
+    setSelectedFile(null);
+  }
+
   return (
     <>
       <Header compact title="Manuscript Feedback" />
@@ -866,17 +1496,27 @@ function FilesScreen() {
                   <FileText className="size-7" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold leading-7 text-[#181c1e]">Proposal_v2.pdf</h2>
+                  <h2 className="text-xl font-bold leading-7 text-[#181c1e]">Upload Latest Manuscript</h2>
                   <p className="text-xs font-semibold leading-4 text-[#74777f]">
-                    Uploaded 4 hours ago - 2.4 MB
+                    Upload your current draft and track advisor review status.
                   </p>
                 </div>
               </div>
-              <Badge className="w-fit gap-1 rounded-full bg-[#ffdad6] px-3 py-1 text-xs font-semibold text-[#ba1a1a] hover:bg-[#ffdad6]">
-                <AlertCircle className="size-3" />
-                Revision Required
-              </Badge>
+              <form className="flex flex-col gap-3 sm:flex-row sm:items-center" onSubmit={handleUpload}>
+                <label className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-[#c4c6cf] bg-[#f7fafc] px-4 py-3 text-sm font-medium text-[#43474e] shadow-sm transition hover:border-[#1960a3]">
+                  <span>{selectedFile?.name ?? "Select manuscript file"}</span>
+                  <input className="hidden" type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} />
+                </label>
+                <Button className="h-12 rounded-lg bg-[#1a365d] text-sm font-semibold text-white hover:bg-[#002045]" disabled={isUploading} type="submit">
+                  {isUploading ? "Uploading..." : "Upload"}
+                </Button>
+              </form>
             </CardContent>
+            {uploadMessage && (
+              <CardContent className="border-t border-[#e2e8f0] p-4">
+                <p className="text-sm font-medium text-[#1960a3]">{uploadMessage}</p>
+              </CardContent>
+            )}
           </Card>
 
           <Card className="relative flex min-h-[600px] flex-col overflow-hidden rounded-lg border-[#c4c6cf] bg-white">
@@ -1366,24 +2006,30 @@ function BottomNav({
   onChange: (screen: Screen) => void;
 }) {
   return (
-    <nav className="fixed bottom-0 left-1/2 z-30 grid h-[76px] w-full max-w-[430px] -translate-x-1/2 grid-cols-4 border-t border-slate-300 bg-white">
-      {navItems.map((item) => {
-        const Icon = item.icon;
-        const active = current === item.id;
-        return (
-          <button
-            key={item.id}
-            className={cn(
-              "flex flex-col items-center justify-center gap-1 text-sm font-bold",
-              active ? "text-blue-700" : "text-slate-600",
-            )}
-            onClick={() => onChange(item.id)}
-          >
-            <Icon className="size-6" />
-            {item.label}
-          </button>
-        );
-      })}
+    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-[430px] -translate-x-1/2 border-t border-[#e2e8f0] bg-white/95 px-3 py-2 backdrop-blur-md shadow-[0_-2px_18px_rgba(15,23,42,0.08)]">
+      <div className="grid grid-cols-4 gap-2">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const active = current === item.id;
+          return (
+            <button
+              key={item.id}
+              aria-label={item.label}
+              className={cn(
+                "flex flex-col items-center justify-center gap-1 rounded-3xl px-2 py-2 text-[11px] font-semibold transition",
+                active
+                  ? "bg-[#eff6ff] text-[#1d4ed8] shadow-sm"
+                  : "text-[#64748b] hover:bg-[#f8fafc] hover:text-[#0f172a]",
+              )}
+              onClick={() => onChange(item.id)}
+              type="button"
+            >
+              <Icon className="size-5" />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
     </nav>
   );
 }

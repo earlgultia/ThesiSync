@@ -1,3 +1,4 @@
+import plugin from "tailwindcss/plugin";
 import type { Config } from "tailwindcss";
 import animate from "tailwindcss-animate";
 
@@ -60,7 +61,38 @@ const config = {
       },
     },
   },
-  plugins: [animate],
+  plugins: [
+    animate,
+    plugin(function ({ matchUtilities }) {
+      const sizes = {
+        3: "0.75rem",
+        4: "1rem",
+        5: "1.25rem",
+        6: "1.5rem",
+        7: "1.75rem",
+        8: "2rem",
+        9: "2.25rem",
+        10: "2.5rem",
+        11: "2.75rem",
+        12: "3rem",
+        14: "3.5rem",
+        16: "4rem",
+        32: "8rem",
+        36: "9rem",
+        40: "10rem",
+      } as const;
+
+      matchUtilities(
+        {
+          size: (value) => ({ width: value, height: value }),
+        },
+        {
+          values: sizes,
+          type: ["length", "percentage"],
+        },
+      );
+    }),
+  ],
 } satisfies Config;
 
 export default config;
