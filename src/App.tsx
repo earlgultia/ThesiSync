@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   ArrowRight,
   Bell,
   BookOpen,
@@ -8,6 +9,8 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock3,
+  Eye,
+  EyeOff,
   FileText,
   FolderOpen,
   Grid2X2,
@@ -130,6 +133,7 @@ function App() {
       <LoginScreen
         onRegister={() => setScreen("register")}
         onSignIn={() => setScreen("dashboard")}
+        onBack={() => setScreen("landing")}
       />
     );
   }
@@ -261,16 +265,10 @@ function LandingScreen({
                 </div>
                 <div>
                   <p className="text-lg font-bold leading-5 text-[#002045]">ThesiSync</p>
-                  <p className="text-xs font-semibold text-[#74777f]">Thesis Year 2024</p>
+                  <p className="text-xs font-semibold text-[#74777f]">Develop 2026</p>
                 </div>
               </div>
-              <button
-                className="rounded-full border border-[#c4c6cf] bg-white px-4 py-2 text-sm font-semibold text-[#002045] transition hover:bg-[#f1f4f6]"
-                onClick={onSignIn}
-                type="button"
-              >
-                Sign In
-              </button>
+
             </div>
 
             <div className="pt-10">
@@ -385,12 +383,15 @@ function LandingFeature({
 function LoginScreen({
   onRegister,
   onSignIn,
+  onBack,
 }: {
   onRegister: () => void;
   onSignIn: () => void;
+  onBack: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -436,6 +437,14 @@ function LoginScreen({
 
       <div className="mx-auto w-full max-w-[420px]">
         <section className="mb-12 text-center">
+          <button
+            className="mb-4 flex items-center gap-2 text-sm font-semibold text-[#1960a3] transition hover:text-[#002045]"
+            onClick={onBack}
+            type="button"
+          >
+            <ArrowLeft className="size-4" />
+            Back to Home
+          </button>
           <div className="mx-auto mb-2 flex size-16 items-center justify-center rounded-full bg-[#002045] text-white shadow-sm">
             <BookOpen className="size-8" strokeWidth={2.5} />
           </div>
@@ -484,14 +493,27 @@ function LoginScreen({
                     Forgot Password?
                   </button>
                 </span>
-                <Input
-                  className="h-12 rounded-t-lg border-0 border-b border-[#c4c6cf] bg-[#f1f4f6] px-4 text-base shadow-none transition-all focus-visible:bg-white focus-visible:ring-0 focus-visible:ring-offset-0"
-                  id="password"
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Password"
-                  type="password"
-                  value={password}
-                />
+                <div className="relative">
+                  <Input
+                    className="h-12 rounded-t-lg border-0 border-b border-[#c4c6cf] bg-[#f1f4f6] px-4 pr-12 text-base shadow-none transition-all focus-visible:bg-white focus-visible:ring-0 focus-visible:ring-offset-0"
+                    id="password"
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                  />
+                  <button
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-[#74777f] transition hover:text-[#43474e]"
+                    onClick={() => setShowPassword(!showPassword)}
+                    type="button"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-5" />
+                    ) : (
+                      <Eye className="size-5" />
+                    )}
+                  </button>
+                </div>
               </label>
 
               <label className="flex items-center gap-2 text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
