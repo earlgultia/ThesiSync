@@ -1,6 +1,8 @@
 {
   "name": "ThesiSync",
   "short_name": "ThesiSync",
+  "description": "ThesiSync offline-capable PWA for thesis productivity.",
+  "scope": "/",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#ffffff",

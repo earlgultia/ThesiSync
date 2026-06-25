@@ -1,3 +1,6 @@
+## Progressive Web App support
+This project now includes a PWA setup with offline asset caching and installable web app behavior. Run `npm run dev` to test the PWA in development, and `npm run build` to produce the web build used by Capacitor for APK packaging.
+
 ## Build APK locally (debug + release)
 After you run `npm run setup:android` or `npm run prepare:android` you can build APKs locally using the helper scripts:
 
@@ -6,6 +9,26 @@ Debug APK (install on device/emulator directly):
 npm run android:assemble-debug
 # result: android/app/build/outputs/apk/debug/app-debug.apk
 ```
+
+CLI-only Android SDK setup (requires Java JDK 11+):
+```bash
+npm run android:setup-sdk
+```
+
+If you do not have Java installed, install OpenJDK and set `JAVA_HOME` or add `java.exe` to your PATH before running the setup script.
+
+Then initialize and build the native Android project:
+```bash
+npm run setup:android
+npm run android:assemble-debug
+```
+
+Or run everything in one command:
+```bash
+npm run android:build-all
+```
+
+This workflow downloads Android command-line tools into `%LOCALAPPDATA%\Android\Sdk`, installs required SDK packages, and creates `android/local.properties` for the Capacitor project.
 
 Release APK:
 ```bash
