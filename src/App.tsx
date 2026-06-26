@@ -31,7 +31,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,7 @@ import { Progress } from "@/components/ui/progress";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
-type Screen = "landing" | "login" | "register" | "dashboard" | "createProject" | "tasks" | "files" | "meetings";
+type Screen = "landing" | "login" | "register" | "dashboard" | "createProject" | "tasks" | "files" | "meetings" | "profile";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: Grid2X2 },
@@ -50,33 +50,60 @@ const navItems = [
   { id: "meetings", label: "Collaboration", icon: MessageSquare },
 ] as const;
 
-const meetings = [
-  {
-    title: "Methodology Deep-Dive",
-    date: "Nov 14, 2023 - 10:30 AM",
-    person: "Dr. Helena Vance",
-    status: "Approved",
-    icon: CalendarCheck,
-  },
-  {
-    title: "Initial Proposal Review",
-    date: "Oct 22, 2023 - 02:00 PM",
-    person: "Dr. Helena Vance",
-    status: "Completed",
-    icon: CheckCircle2,
-  },
-  {
-    title: "Bibliography Audit",
-    date: "Dec 01, 2023 - 09:00 AM",
-    person: "Library Liaison",
-    status: "Pending",
-    icon: XCircle,
-  },
-] as const;
+const meetings: MeetingEntry[] = [];
+
+type Notification = {
+  id: string;
+  title: string;
+  message: string;
+  type: "info" | "success" | "warning" | "error";
+  timestamp: Date;
+};
+
+type MeetingEntry = {
+  id: string;
+  title: string;
+  date: string;
+  person: string;
+  status: "Approved" | "Completed" | "Pending";
+  icon: React.ComponentType<{ className?: string }>;
+};
 
 function App() {
   const [screen, setScreen] = useState<Screen>("landing");
+  const [createdProjectId, setCreatedProjectId] = useState<string | null>(null);
   const [isAuthChecked, setIsAuthChecked] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  function addNotification(title: string, message: string, type: "info" | "success" | "warning" | "error" = "info") {
+    const notification: Notification = {
+      id: Date.now().toString(),
+      title,
+      message,
+      type,
+      timestamp: new Date(),
+    };
+    setNotifications((prev) => [notification, ...prev]);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
+    }, 5000);
+  }
+
+  function removeNotification(id: string) {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }
+
+  async function handleLogout() {
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+    setScreen("login");
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -150,16 +177,36 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <MobileFrame>
-        {screen === "dashboard" && <DashboardScreen onNavigate={setScreen} />}
+        {screen === "dashboard" && (
+          <DashboardScreen
+            createdProjectId={createdProjectId}
+            onNavigate={setScreen}
+            onProfileClick={() => setScreen("profile")}
+            onNotification={addNotification}
+            notifications={notifications}
+            showNotifications={showNotifications}
+            onShowNotifications={setShowNotifications}
+          />
+        )}
         {screen === "createProject" && (
           <CreateProjectScreen
             onCancel={() => setScreen("dashboard")}
-            onCreated={() => setScreen("dashboard")}
+            onCreated={(projectId) => {
+              setCreatedProjectId(projectId);
+              setScreen("dashboard");
+            }}
+            onLogout={handleLogout}
+            onProfileClick={() => setScreen("profile")}
+            onNotification={addNotification}
+            notifications={notifications}
+            showNotifications={showNotifications}
+            onShowNotifications={setShowNotifications}
           />
         )}
-        {screen === "tasks" && <TasksScreen />}
-        {screen === "files" && <FilesScreen />}
-        {screen === "meetings" && <MeetingsScreen />}
+        {screen === "tasks" && <TasksScreen onLogout={handleLogout} onProfileClick={() => setScreen("profile")} onNotification={addNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={setShowNotifications} />}
+        {screen === "files" && <FilesScreen onLogout={handleLogout} onProfileClick={() => setScreen("profile")} onNotification={addNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={setShowNotifications} />}
+        {screen === "meetings" && <MeetingsScreen onLogout={handleLogout} onProfileClick={() => setScreen("profile")} onNotification={addNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={setShowNotifications} />}
+        {screen === "profile" && <ProfileScreen onBack={() => setScreen("dashboard")} onLogout={handleLogout} onNotification={addNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={setShowNotifications} />}
         <BottomNav current={screen} onChange={setScreen} />
       </MobileFrame>
     </div>
@@ -176,25 +223,35 @@ function MobileFrame({ children }: { children: React.ReactNode }) {
 
 function Header({
   compact,
-  title = "Dissertation Hub",
+  title = "ThesiSync",
   userName,
   onLogout,
+  onProfileClick,
+  onNotification,
+  notifications = [],
+  showNotifications,
+  onShowNotifications,
 }: {
   compact?: boolean;
   title?: string;
   userName?: string;
   onLogout?: () => void;
+  onProfileClick?: () => void;
+  onNotification?: (title: string, message: string, type?: "info" | "success" | "warning" | "error") => void;
+  notifications?: Notification[];
+  showNotifications?: boolean;
+  onShowNotifications?: (show: boolean) => void;
 }) {
   return (
     <header className="sticky top-0 z-20 flex h-[76px] items-center justify-between border-b border-[#c4c6cf] bg-[#f7fafc] px-5 backdrop-blur-sm">
       <div className="flex min-w-0 items-center gap-3">
-        {compact ? (
-          <Menu className="size-5 shrink-0 text-[#0f172a]" />
-        ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e2e8f0] ring-1 ring-[#c4c6cf] text-[#0f172a]">
-            <span className="font-bold">D</span>
-          </div>
-        )}
+        {compact ? <Menu className="size-5 shrink-0 text-[#0f172a]" /> : null}
+
+        {/* App icon for ThesiSync (left of the title) */}
+        <div className="flex shrink-0 items-center justify-center rounded-lg bg-[#002045] text-white p-2">
+          <BookOpen className="size-5" />
+        </div>
+
         <h1
           className={cn(
             "truncate font-bold leading-tight text-[#0f172a]",
@@ -205,36 +262,83 @@ function Header({
         </h1>
       </div>
       <div className="flex items-center gap-3">
-        <button className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ffffff] text-[#0f172a] shadow-sm transition hover:bg-[#e2e8f0]" type="button">
-          <Bell className="size-5" />
-        </button>
-        {onLogout ? (
-          <>
-            <Button
-              className="hidden h-11 rounded-full bg-[#e2e8f0] px-4 text-sm font-semibold text-[#0f172a] hover:bg-[#cbd5e1] md:inline-flex"
-              onClick={onLogout}
-              type="button"
-            >
-              Logout
-            </Button>
-            <button
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[#e2e8f0] text-[#0f172a] shadow-sm transition hover:bg-[#cbd5e1] md:hidden"
-              onClick={onLogout}
-              type="button"
-            >
-              <LogOut className="size-5" />
-            </button>
-          </>
-        ) : null}
+        <div className="relative">
+          <button 
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ffffff] text-[#0f172a] shadow-sm transition hover:bg-[#e2e8f0]" 
+            type="button"
+            onClick={() => onShowNotifications?.(!showNotifications)}
+          >
+            <Bell className="size-5" />
+            {notifications.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
+                {notifications.length > 9 ? "9+" : notifications.length}
+              </span>
+            )}
+          </button>
+          {showNotifications && (
+            <NotificationsPanel notifications={notifications} onClose={() => onShowNotifications?.(false)} />
+          )}
+        </div>
+        {/* Logout moved into Profile screen */}
         {compact ? (
           <Avatar name={userName ?? "User"} className="size-8 bg-[#0f172a] text-white" />
-        ) : userName ? (
-          <Avatar name={userName} className="hidden size-12 bg-[#0f172a] text-white min-[390px]:flex" />
+        ) : userName || onProfileClick ? (
+          <button
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-[#0f172a] text-white outline-none transition hover:ring-2 hover:ring-[#bfdbfe] md:h-12 md:w-12"
+            onClick={onProfileClick}
+            type="button"
+            aria-label={onProfileClick ? "Open profile" : "User profile"}
+          >
+            <Avatar name={userName ?? "User"} className="size-10 md:size-12" />
+          </button>
         ) : (
-          <div className="hidden h-12 w-12 rounded-full bg-[#e2e8f0] ring-1 ring-[#c4c6cf] min-[390px]:flex" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e2e8f0] ring-1 ring-[#c4c6cf] md:h-12 md:w-12" />
         )}
       </div>
     </header>
+  );
+}
+
+function NotificationsPanel({ notifications, onClose }: { notifications: Notification[]; onClose: () => void }) {
+  return (
+    <div className="fixed inset-x-0 top-20 z-50 mx-auto w-[min(90vw,20rem)] rounded-lg border border-[#c4c6cf] bg-white shadow-lg">
+      <div className="flex items-center justify-between border-b border-[#e0e3e5] px-4 py-3">
+        <h3 className="font-semibold text-[#002045]">Notifications</h3>
+        <button
+          onClick={onClose}
+          className="text-[#64748b] hover:text-[#0f172a]"
+          type="button"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="max-h-96 overflow-y-auto">
+        {notifications.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-[#64748b]">
+            No notifications yet
+          </div>
+        ) : (
+          notifications.map((notification) => (
+            <div
+              key={notification.id}
+              className={cn(
+                "border-b border-[#e0e3e5] px-4 py-3 last:border-b-0",
+                notification.type === "success" && "bg-emerald-50",
+                notification.type === "error" && "bg-red-50",
+                notification.type === "warning" && "bg-amber-50",
+                notification.type === "info" && "bg-blue-50",
+              )}
+            >
+              <p className="font-semibold text-[#002045]">{notification.title}</p>
+              <p className="mt-1 text-sm text-[#43474e]">{notification.message}</p>
+              <p className="mt-2 text-xs text-[#64748b]">
+                {new Date(notification.timestamp).toLocaleTimeString()}
+              </p>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -265,10 +369,9 @@ function LandingScreen({
                 </div>
                 <div>
                   <p className="text-lg font-bold leading-5 text-[#002045]">ThesiSync</p>
-                  <p className="text-xs font-semibold text-[#74777f]">Develop 2026</p>
+                  <p className="text-xs font-semibold text-[#74777f]">Version 1.0.0</p>
                 </div>
               </div>
-
             </div>
 
             <div className="pt-10">
@@ -304,28 +407,6 @@ function LandingScreen({
         </div>
 
         <div className="px-5 py-5">
-          <div className="rounded-lg border border-[#c4c6cf] bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#1960a3]">
-                  Active Project
-                </p>
-                <h2 className="mt-2 text-xl font-bold leading-7 text-[#002045]">
-                  Barangay Emergency Response System
-                </h2>
-              </div>
-              <Badge className="bg-[#1960a3]/10 text-[#1960a3] hover:bg-[#1960a3]/10">
-                65%
-              </Badge>
-            </div>
-            <Progress className="mt-4 h-2 bg-[#ebeef0]" indicatorClassName="bg-[#1960a3]" value={65} />
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              <LandingMetric label="Progress" value="65%" />
-              <LandingMetric label="Tasks" value="12" />
-              <LandingMetric label="Reviews" value="4" />
-            </div>
-          </div>
-
           <div className="mt-4 grid gap-3">
             <LandingFeature
               icon={ClipboardList}
@@ -346,15 +427,6 @@ function LandingScreen({
         </div>
       </section>
     </main>
-  );
-}
-
-function LandingMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-[#d6e3ff] bg-[#f8fbff] p-3 text-center">
-      <p className="text-lg font-bold text-[#002045]">{value}</p>
-      <p className="mt-1 text-[11px] font-semibold text-[#1960a3]">{label}</p>
-    </div>
   );
 }
 
@@ -437,14 +509,6 @@ function LoginScreen({
 
       <div className="mx-auto w-full max-w-[420px]">
         <section className="mb-12 text-center">
-          <button
-            className="mb-4 flex items-center gap-2 text-sm font-semibold text-[#1960a3] transition hover:text-[#002045]"
-            onClick={onBack}
-            type="button"
-          >
-            <ArrowLeft className="size-4" />
-            Back to Home
-          </button>
           <div className="mx-auto mb-2 flex size-16 items-center justify-center rounded-full bg-[#002045] text-white shadow-sm">
             <BookOpen className="size-8" strokeWidth={2.5} />
           </div>
@@ -482,16 +546,8 @@ function LoginScreen({
               </label>
 
               <label className="block space-y-2">
-                <span className="flex items-center justify-between">
-                  <span className="block text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
-                    Password
-                  </span>
-                  <button
-                    className="text-xs font-semibold uppercase leading-4 tracking-[0.05em] text-[#1960a3] transition hover:underline"
-                    type="button"
-                  >
-                    Forgot Password?
-                  </button>
+                <span className="block text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
+                  Password
                 </span>
                 <div className="relative">
                   <Input
@@ -514,6 +570,12 @@ function LoginScreen({
                     )}
                   </button>
                 </div>
+                <button
+                  className="ml-auto block text-right text-xs font-semibold uppercase leading-4 tracking-[0.05em] text-[#1960a3] transition hover:underline"
+                  type="button"
+                >
+                  Forgot Password?
+                </button>
               </label>
 
               <label className="flex items-center gap-2 text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
@@ -541,6 +603,17 @@ function LoginScreen({
                 {isSigningIn ? "Signing In..." : "Sign In"}
                 <LogIn className="size-5" />
               </Button>
+
+              <div className="mt-4 flex justify-center">
+                <button
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-[#1960a3] transition hover:text-[#002045]"
+                  onClick={onBack}
+                  type="button"
+                >
+                  <ArrowLeft className="size-4" />
+                  Back to Home
+                </button>
+              </div>
             </form>
 
             <div className="my-6 flex items-center">
@@ -595,6 +668,8 @@ function RegisterScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [role, setRole] = useState("student");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [message, setMessage] = useState("");
@@ -626,6 +701,8 @@ function RegisterScreen({
       options: {
         data: {
           full_name: fullName,
+          name: fullName,
+          display_name: fullName,
           role,
           student_id: studentId,
         },
@@ -723,28 +800,48 @@ function RegisterScreen({
                   <span className="block text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
                     Password
                   </span>
-                  <Input
-                    className="h-11 rounded-t-lg border-0 border-b border-[#c4c6cf] bg-[#f1f4f6] px-4 text-base shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:ring-offset-0"
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="Minimum 6 characters"
-                    required
-                    type="password"
-                    value={password}
-                  />
+                  <div className="relative">
+                    <Input
+                      className="h-11 rounded-t-lg border-0 border-b border-[#c4c6cf] bg-[#f1f4f6] px-4 pr-11 text-base shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:ring-offset-0"
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder="Minimum 6 characters"
+                      required
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#475569] transition hover:text-[#0f172a]"
+                      onClick={() => setShowPassword((current) => !current)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
+                    </button>
+                  </div>
                 </label>
 
                 <label className="block space-y-2">
                   <span className="block text-sm font-medium leading-5 tracking-[0.01em] text-[#43474e]">
                     Confirm Password
                   </span>
-                  <Input
-                    className="h-11 rounded-t-lg border-0 border-b border-[#c4c6cf] bg-[#f1f4f6] px-4 text-base shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:ring-offset-0"
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    placeholder="Repeat password"
-                    required
-                    type="password"
-                    value={confirmPassword}
-                  />
+                  <div className="relative">
+                    <Input
+                      className="h-11 rounded-t-lg border-0 border-b border-[#c4c6cf] bg-[#f1f4f6] px-4 pr-11 text-base shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:ring-offset-0"
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      placeholder="Repeat password"
+                      required
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={confirmPassword}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#475569] transition hover:text-[#0f172a]"
+                      onClick={() => setShowConfirmPassword((current) => !current)}
+                      aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                    >
+                      {showConfirmPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
+                    </button>
+                  </div>
                 </label>
               </div>
 
@@ -831,12 +928,85 @@ type DashboardFeedback = {
   author: string;
 };
 
+type ManuscriptFile = {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+  size: number | null;
+};
+
+type DiscussionEntry = {
+  id: string;
+  author: string;
+  message: string;
+  time: string;
+};
+
+type TimelineItem = {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  date: Date | null;
+  dateLabel: string;
+  accent: string;
+  kind: "milestone" | "task";
+};
+
+function getTimelineAccent(status: string) {
+  const normalized = status.toLowerCase();
+  if (/(done|completed)/i.test(normalized)) {
+    return "bg-[#dcfce7] text-[#166534]";
+  }
+  if (/(in progress|ongoing|active)/i.test(normalized)) {
+    return "bg-[#dbeafe] text-[#1d4ed8]";
+  }
+  if (/(pending|review|awaiting)/i.test(normalized)) {
+    return "bg-[#fef3c7] text-[#92400e]";
+  }
+  return "bg-[#f8fafc] text-[#475569]";
+}
+
+function formatTimelineDate(date?: Date) {
+  if (!date) {
+    return "No date";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function normalizeTimelineItem(row: DatabaseRecord, kind: "milestone" | "task", index: number): TimelineItem {
+  const status = getString(row, ["status", "state"], kind === "milestone" ? "Pending" : "Planned");
+  const date = getDate(row, ["due_date", "deadline", "target_date", "scheduled_at", "created_at"]);
+  const title = getString(row, ["title", "name", "task_name", "milestone_name"], kind === "milestone" ? "Untitled milestone" : "Untitled task");
+  const description = getString(row, ["description", "notes", "summary", "details"], kind === "milestone" ? "No milestone details available." : "No task details available.");
+
+  return {
+    id: getString(row, ["id"], `${kind}-${index}`),
+    title,
+    description,
+    status,
+    date,
+    dateLabel: date ? formatTimelineDate(date) : `${kind === "milestone" ? "Milestone" : "Task"} ${index + 1}`,
+    accent: getTimelineAccent(status),
+    kind,
+  };
+}
+
 type DashboardData = {
   userName: string;
+  fullName: string;
   project: DashboardProject | null;
   milestones: DashboardMilestone[];
   deadlines: DashboardDeadline[];
   feedback: DashboardFeedback | null;
+  avatarUrl?: string | null;
 };
 
 type DashboardLoadState =
@@ -1004,6 +1174,88 @@ function deriveProgress(project: DashboardProject, taskRows: DatabaseRecord[]) {
   return Math.round((completed / taskRows.length) * 100);
 }
 
+function compactRecord(record: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== undefined && value !== null && value !== ""),
+  ) as Record<string, unknown>;
+}
+
+function isSchemaIssue(message: string) {
+  return /relation .* does not exist|table .* does not exist|column .* does not exist|on conflict target does not exist/i.test(message);
+}
+
+async function ensureUserProfile(userId: string, metadata: DatabaseRecord = {}, email?: string): Promise<void> {
+  if (!isSupabaseConfigured || !userId) {
+    return;
+  }
+
+  const fullName = getString(metadata, ["full_name", "name", "display_name", "fullName"]);
+  const role = getString(metadata, ["role"]);
+  const studentId = getString(metadata, ["student_id", "studentId"]);
+  const emailAddress = email ?? getString(metadata, ["email"]);
+
+  const profileCandidates = [
+    {
+      key: "id",
+      data: {
+        id: userId,
+        email: emailAddress,
+        full_name: fullName,
+        name: fullName,
+        display_name: fullName,
+        role,
+        student_id: studentId,
+      },
+    },
+    {
+      key: "user_id",
+      data: {
+        user_id: userId,
+        email: emailAddress,
+        full_name: fullName,
+        name: fullName,
+        display_name: fullName,
+        role,
+        student_id: studentId,
+      },
+    },
+  ];
+
+  for (const candidate of profileCandidates) {
+    const payload = compactRecord(candidate.data);
+    if (!payload[candidate.key]) {
+      continue;
+    }
+
+    try {
+      const upsertResult = await supabase
+        .from("users")
+        .upsert(payload as any, { onConflict: candidate.key })
+        .select("*")
+        .maybeSingle();
+
+      if (!upsertResult.error) {
+        return;
+      }
+
+      const message = String((upsertResult.error as any)?.message || upsertResult.error);
+      if (isSchemaIssue(message)) {
+        continue;
+      }
+
+      console.warn("ensureUserProfile failed with unexpected error:", upsertResult.error, payload);
+      return;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isSchemaIssue(message)) {
+        continue;
+      }
+      console.warn("ensureUserProfile unexpected error:", error, payload);
+      return;
+    }
+  }
+}
+
 async function createProjectForUser(
   userId: string,
   title: string,
@@ -1019,6 +1271,18 @@ async function createProjectForUser(
   } catch (err) {
     console.warn("createProjectForUser: unable to read auth user, proceeding without user id", err);
     effectiveUserId = effectiveUserId ?? "";
+  }
+
+  // Try to create a matching profile row first so backend triggers can resolve the auth user.
+  try {
+    const userInfo = await supabase.auth.getUser();
+    await ensureUserProfile(
+      effectiveUserId,
+      asRecord(userInfo.data?.user?.user_metadata ?? {}) ?? {},
+      userInfo.data?.user?.email ?? undefined,
+    );
+  } catch (error: unknown) {
+    console.warn("Failed to ensure user profile row before project creation:", error);
   }
 
   // Try inserting with multiple common owner columns, retrying if the schema differs
@@ -1051,6 +1315,7 @@ async function createProjectForUser(
   console.error("createProjectForUser failed with all insert payloads", lastError);
   throw lastError instanceof Error ? lastError : new Error("Unable to create a project. Please check your thesis_projects schema.");
 }
+
 
 async function fetchFirstProjectForUser(userId: string) {
   const membershipResult = await supabase
@@ -1092,7 +1357,6 @@ async function fetchFirstProjectForUser(userId: string) {
         return ownProject ? normalizeProject(ownProject) : null;
       }
     } catch (e) {
-      // ignore and try next column
       console.warn(`thesis_projects column lookup failed for ${col}:`, e);
     }
   }
@@ -1130,6 +1394,47 @@ async function fetchProjectRows(
   return rows;
 }
 
+async function fetchProjectManuscriptFiles(projectId: string, userId: string): Promise<ManuscriptFile[]> {
+  const directory = `${projectId}/${userId}`;
+  const result = await supabase.storage.from("thesis-documents").list(directory, {
+    limit: 100,
+    offset: 0,
+    sortBy: { column: "updated_at", order: "desc" },
+  });
+
+  if (result.error || !Array.isArray(result.data)) {
+    return [];
+  }
+
+  return result.data
+    .map((item) => {
+      const record = asRecord(item) ?? {};
+      const folderPath = getString(record, ["path"], "");
+      const itemName = getString(record, ["name"], "Unnamed document");
+      const metadata = asRecord(record.metadata) ?? {};
+      const rawSize = metadata && typeof metadata.size === "number" ? metadata.size : null;
+
+      return {
+        id: folderPath || `${directory}/${itemName}`,
+        name: itemName,
+        path: folderPath || `${directory}/${itemName}`,
+        createdAt: getDate(record, ["created_at"]),
+        updatedAt: getDate(record, ["updated_at"]),
+        size: rawSize,
+      };
+    })
+    .filter((file) => Boolean(file.path));
+}
+
+async function createSignedManuscriptUrl(filePath: string): Promise<string | null> {
+  const { data, error } = await supabase.storage.from("thesis-documents").createSignedUrl(filePath, 60);
+  if (error || !data?.signedUrl) {
+    return null;
+  }
+
+  return data.signedUrl;
+}
+
 async function fetchLatestFeedback(projectId: string): Promise<DashboardFeedback | null> {
   for (const table of ["feedback", "comments", "reviews"]) {
     const result = await supabase
@@ -1151,7 +1456,26 @@ async function fetchLatestFeedback(projectId: string): Promise<DashboardFeedback
   return null;
 }
 
-async function loadDashboardData(): Promise<DashboardLoadState> {
+async function fetchProjectById(projectId: string): Promise<DashboardProject | null> {
+  const result = await supabase
+    .from("thesis_projects")
+    .select("*")
+    .eq("id", projectId)
+    .maybeSingle();
+
+  if (!result.error && result.data) {
+    const project = asRecord(result.data);
+    return project ? normalizeProject(project) : null;
+  }
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  return null;
+}
+
+async function loadDashboardData(createdProjectId?: string | null): Promise<DashboardLoadState> {
   try {
     if (!isSupabaseConfigured) {
       return {
@@ -1182,13 +1506,27 @@ async function loadDashboardData(): Promise<DashboardLoadState> {
       };
     }
 
+    try {
+      await ensureUserProfile(user.id, asRecord(user.user_metadata ?? {}) ?? {}, user.email ?? undefined);
+    } catch (error: unknown) {
+      console.warn("Unable to ensure user profile during dashboard load:", error);
+    }
+
     const userName = getString(
       asRecord(user.user_metadata) ?? {},
-      ["full_name", "name"],
+      ["name", "display_name", "full_name", "fullName"],
       user.email ?? "User",
     );
 
-    const project = await withTimeout(fetchFirstProjectForUser(user.id));
+    let project: DashboardProject | null = null;
+
+    if (createdProjectId) {
+      project = await withTimeout(fetchProjectById(createdProjectId));
+    }
+
+    if (!project) {
+      project = await withTimeout(fetchFirstProjectForUser(user.id));
+    }
 
     if (!project) {
       return {
@@ -1215,18 +1553,29 @@ async function loadDashboardData(): Promise<DashboardLoadState> {
       .sort((first, second) => first.dueDate.getTime() - second.dueDate.getTime())
       .slice(0, 2);
 
+    const avatarUrl = getString(
+      asRecord(userData.user.user_metadata) ?? {},
+      ["avatar_url", "avatarUrl", "avatar"],
+    );
+
     return {
       status: "ready",
       data: {
         userName: getString(
           asRecord(userData.user.user_metadata) ?? {},
-          ["full_name", "name"],
+          ["name", "display_name", "fullName", "full_name"],
+          userData.user.email ?? "User",
+        ),
+        fullName: getString(
+          asRecord(userData.user.user_metadata) ?? {},
+          ["full_name", "fullName", "name", "display_name"],
           userData.user.email ?? "User",
         ),
         project: { ...project, progress },
         milestones,
         deadlines,
         feedback,
+        avatarUrl: avatarUrl || null,
       },
     };
   } catch (err: unknown) {
@@ -1245,11 +1594,35 @@ async function loadDashboardData(): Promise<DashboardLoadState> {
   }
 }
 
-function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void }) {
+function DashboardScreen({
+  createdProjectId,
+  onNavigate,
+  onProfileClick,
+  onNotification,
+  notifications = [],
+  showNotifications,
+  onShowNotifications,
+}: {
+  createdProjectId?: string | null;
+  onNavigate: (screen: Screen) => void;
+  onProfileClick?: () => void;
+  onNotification?: (title: string, message: string, type?: "info" | "success" | "warning" | "error") => void;
+  notifications?: Notification[];
+  showNotifications?: boolean;
+  onShowNotifications?: (show: boolean) => void;
+}) {
   const [dashboardState, setDashboardState] = useState<DashboardLoadState>({ status: "loading" });
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [projectMessage, setProjectMessage] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editingName, setEditingName] = useState("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   async function handleLogout() {
     try {
@@ -1260,10 +1633,163 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
     onNavigate("login");
   }
 
+  function handleEditNameStart() {
+    if (dashboardState.status === "ready") {
+      setEditingName(dashboardState.data.userName);
+      setIsEditingName(true);
+    }
+  }
+
+  async function handleSaveName() {
+    if (!editingName.trim()) {
+      setEditingName(dashboardState.status === "ready" ? dashboardState.data.userName : "");
+      setIsEditingName(false);
+      return;
+    }
+
+    if (dashboardState.status === "ready" && editingName === dashboardState.data.userName) {
+      setIsEditingName(false);
+      return;
+    }
+
+    try {
+      if (!isSupabaseConfigured) {
+        setIsEditingName(false);
+        return;
+      }
+
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          name: editingName.trim(),
+          display_name: editingName.trim(),
+          full_name: editingName.trim(),
+        },
+      });
+
+      if (error) {
+        console.error("Failed to update name:", error);
+        return;
+      }
+
+      setDashboardState((prev) => {
+        if (prev.status === "ready") {
+          return {
+            ...prev,
+            data: {
+              ...prev.data,
+              userName: editingName.trim(),
+              fullName: editingName.trim(),
+            },
+          };
+        }
+        return prev;
+      });
+
+      setIsEditingName(false);
+    } catch (error) {
+      console.error("Error updating name:", error);
+    }
+  }
+
+  function handleAvatarFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    setAvatarError(null);
+    if (file) {
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setAvatarPreview(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
+  async function handleUploadAvatar() {
+    if (!avatarFile || !isSupabaseConfigured) {
+      setAvatarError("Please select an image file first.");
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    setAvatarError(null);
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !userData.user?.id) {
+        setAvatarError("User not authenticated. Please sign in again.");
+        setIsUploadingAvatar(false);
+        return;
+      }
+
+      const userId = userData.user.id;
+      const fileExt = avatarFile.name.split(".").pop()?.toLowerCase();
+      
+      if (!fileExt || !["jpg", "jpeg", "png", "gif", "webp"].includes(fileExt)) {
+        setAvatarError("Please upload a valid image file (JPG, PNG, GIF, or WebP).");
+        setIsUploadingAvatar(false);
+        return;
+      }
+
+      const fileName = `${userId}-avatar.${fileExt}`;
+      const filePath = `avatars/${fileName}`;
+
+      // Upload avatar to storage
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(filePath, avatarFile, { upsert: true });
+
+      if (uploadError) {
+        console.error("Avatar upload error:", uploadError);
+        if (uploadError.message.includes("bucket")) {
+          setAvatarError("Storage not configured. Please ensure the 'avatars' bucket exists in Supabase.");
+        } else {
+          setAvatarError(uploadError.message || "Failed to upload avatar. Please try again.");
+        }
+        setIsUploadingAvatar(false);
+        return;
+      }
+
+      // Get public URL
+      const { data } = supabase.storage.from("avatars").getPublicUrl(filePath);
+      const avatarUrl = data.publicUrl;
+
+      // Update user metadata with avatar URL
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: {
+          avatar_url: avatarUrl,
+        },
+      });
+
+      if (updateError) {
+        console.error("Failed to update avatar URL:", updateError);
+        setAvatarError("Failed to save avatar. Please try again.");
+        setIsUploadingAvatar(false);
+        return;
+      }
+
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      setAvatarError(null);
+      setAvatarUrl(avatarUrl);
+    } catch (error) {
+      console.error("Error uploading avatar:", error);
+      setAvatarError(error instanceof Error ? error.message : "An unexpected error occurred.");
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  }
+
+  useEffect(() => {
+    if (dashboardState.status === "ready") {
+      setAvatarUrl(dashboardState.data.avatarUrl ?? null);
+    }
+  }, [dashboardState]);
+
   useEffect(() => {
     let isMounted = true;
 
-    loadDashboardData()
+    loadDashboardData(createdProjectId)
       .then((state) => {
         if (isMounted) {
           setDashboardState(state);
@@ -1282,13 +1808,13 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [createdProjectId]);
 
   async function refreshDashboard() {
     setIsRefreshing(true);
     setDashboardState({ status: "loading" });
     try {
-      const state = await loadDashboardData();
+      const state = await loadDashboardData(createdProjectId);
       setDashboardState(state);
     } catch (err: unknown) {
       const message =
@@ -1307,7 +1833,7 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
   if (dashboardState.status === "loading") {
     return (
       <>
-        <Header onLogout={handleLogout} />
+        <Header onLogout={handleLogout} onProfileClick={onProfileClick} onNotification={onNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={onShowNotifications} />
         <main className="grid gap-6 px-4 pb-28 pt-6 md:grid-cols-[1fr_320px] md:px-8">
           <DashboardNotice title="Loading dashboard" message="Fetching your thesis data." />
         </main>
@@ -1318,7 +1844,7 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
   if (dashboardState.status === "empty" || dashboardState.status === "error") {
     return (
       <>
-        <Header onLogout={handleLogout} />
+        <Header onLogout={handleLogout} onProfileClick={onProfileClick} onNotification={onNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={onShowNotifications} />
         <main className="grid gap-6 px-4 pb-28 pt-6 md:grid-cols-[1fr_320px] md:px-8">
           <DashboardNotice
             title={dashboardState.status === "error" ? "Dashboard unavailable" : "No dashboard data"}
@@ -1385,10 +1911,155 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
 
   return (
     <>
-      <Header title="Dissertation Hub" userName={dashboardState.data.userName} onLogout={handleLogout} />
+      <Header title="ThesiSync" userName={dashboardState.data.userName} onLogout={handleLogout} onProfileClick={onProfileClick} onNotification={onNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={onShowNotifications} />
 
       <main className="flex min-h-[calc(100vh-76px)] flex-col gap-6 bg-[#f7fafc] px-4 py-6 md:flex-row md:px-8">
-        <aside className="hidden md:flex md:w-[280px] md:flex-col md:gap-6">
+        <aside className="flex w-full flex-col gap-6 md:w-[280px]">
+          <Card className="rounded-3xl border border-[#e0e3e5] bg-white p-6 shadow-sm">
+            <CardContent className="space-y-4 p-0">
+              {isEditingName ? (
+                <div className="flex flex-col gap-3 rounded-3xl bg-[#f8fafc] p-4">
+                  <label className="block space-y-2">
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#1960a3]">Edit Name</p>
+                    <Input
+                      autoFocus
+                      className="h-11 rounded-t-lg border-0 border-b border-[#c4c6cf] bg-white px-4 text-base shadow-none focus-visible:bg-white focus-visible:ring-0 focus-visible:ring-offset-0"
+                      onChange={(e) => setEditingName(e.target.value)}
+                      placeholder="Enter your name"
+                      type="text"
+                      value={editingName}
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <Button
+                      className="flex-1 h-9 rounded-lg bg-[#1d4ed8] text-sm font-semibold text-white hover:bg-[#133c7b]"
+                      onClick={handleSaveName}
+                      type="button"
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      className="flex-1 h-9 rounded-lg border border-[#c4c6cf] bg-white text-sm font-semibold text-[#0f172a] hover:bg-[#f1f4f6]"
+                      onClick={() => setIsEditingName(false)}
+                      type="button"
+                      variant="outline"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <div
+                      className="flex items-center gap-4 rounded-3xl bg-[#f8fafc] p-4 text-left transition hover:bg-[#e2efff] w-full cursor-pointer"
+                      onClick={onProfileClick}
+                    >
+                      <div className="relative">
+                        <Avatar
+                          name={dashboardState.status === "ready" ? dashboardState.data.userName : "User"}
+                          src={avatarPreview ?? avatarUrl ?? undefined}
+                          className="size-14 bg-[#1d4ed8] text-white"
+                        />
+                        <button
+                          type="button"
+                          className="absolute bottom-0 right-0 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-[#1960a3] cursor-pointer hover:bg-[#1a365d] transition shadow-md"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            avatarInputRef.current?.click();
+                          }}
+                        >
+                          <input
+                            ref={avatarInputRef}
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleAvatarFileChange}
+                            type="file"
+                          />
+                          <PenLine className="size-4 text-white" />
+                        </button>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#1960a3]">Profile</p>
+                        <h3 className="text-xl font-semibold text-[#002045]">{dashboardState.status === "ready" ? dashboardState.data.userName : "Loading..."}</h3>
+                        {dashboardState.status === "ready" && dashboardState.data.fullName ? (
+                          <p className="text-sm text-[#64748b]">{dashboardState.data.fullName}</p>
+                        ) : (
+                          <p className="text-sm text-[#64748b]">Thesis researcher</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {avatarPreview && (
+                    <div className="flex flex-col gap-2 rounded-2xl bg-[#f1f5f9] p-3">
+                      <div className="flex items-center gap-2">
+                        <img src={avatarPreview} alt="Avatar preview" className="size-10 rounded-full object-cover" />
+                        <p className="flex-1 text-sm font-semibold text-[#0f172a]">Avatar Preview</p>
+                      </div>
+                      {avatarError && (
+                        <p className="rounded bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+                          {avatarError}
+                        </p>
+                      )}
+                      <div className="flex gap-2">
+                        <Button
+                          className="flex-1 h-9 rounded-lg bg-[#1d4ed8] text-sm font-semibold text-white hover:bg-[#133c7b]"
+                          disabled={isUploadingAvatar}
+                          onClick={handleUploadAvatar}
+                          type="button"
+                        >
+                          {isUploadingAvatar ? "Uploading..." : "Upload Avatar"}
+                        </Button>
+                        <Button
+                          className="flex-1 h-9 rounded-lg border border-[#c4c6cf] bg-white text-sm font-semibold text-[#0f172a] hover:bg-[#f1f4f6]"
+                          onClick={() => {
+                            setAvatarFile(null);
+                            setAvatarPreview(null);
+                            setAvatarError(null);
+                          }}
+                          type="button"
+                          variant="outline"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {dashboardState.status === "ready" && (
+                    <button
+                      type="button"
+                      onClick={handleEditNameStart}
+                      className="flex items-center justify-center gap-2 rounded-2xl bg-[#f1f5f9] p-3 text-sm font-semibold text-[#1d4ed8] transition hover:bg-[#e2efff]"
+                    >
+                      <PenLine className="size-4" />
+                      Edit Name
+                    </button>
+                  )}
+                </>
+              )}
+              <div className="mt-3 grid gap-3">
+                <Button
+                  className="h-11 w-full rounded-2xl bg-[#1d4ed8] text-sm font-semibold text-white hover:bg-[#133c7b]"
+                  onClick={onProfileClick}
+                  type="button"
+                >
+                  View Profile
+                </Button>
+                <div className="grid gap-2 rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
+                  <div className="rounded-3xl bg-white p-3 shadow-sm">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-[#64748b]">Projects</p>
+                    <p className="mt-1 text-sm font-semibold text-[#0f172a]">1 active</p>
+                  </div>
+                  <div className="rounded-3xl bg-white p-3 shadow-sm">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-[#64748b]">Status</p>
+                    <p className="mt-1 text-sm font-semibold text-[#0f172a]">Active</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <div className="rounded-3xl border border-[#e0e3e5] bg-white p-6 shadow-sm">
             <h2 className="text-xl font-semibold text-[#002045]">Academic Portal</h2>
             <div className="mt-4 flex items-center gap-3 rounded-3xl border border-[#e0e3e5] bg-[#f1f5f9] p-4">
@@ -1399,37 +2070,6 @@ function DashboardScreen({ onNavigate }: { onNavigate: (screen: Screen) => void 
               </div>
             </div>
           </div>
-
-          <nav className="rounded-3xl border border-[#e0e3e5] bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-2">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const active = item.id === "dashboard";
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => onNavigate(item.id)}
-                    type="button"
-                    className={cn(
-                      "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold transition",
-                      active ? "bg-[#dbeafe] text-[#1d4ed8]" : "text-[#475569] hover:bg-[#f8fafc]",
-                    )}
-                  >
-                    <Icon className="size-5" />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => onNavigate("meetings")}
-                className="mt-4 flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold text-[#475569] hover:bg-[#f8fafc]"
-              >
-                <Info className="size-5" />
-                <span>Settings</span>
-              </button>
-            </div>
-          </nav>
 
           <div className="rounded-3xl border border-[#e0e3e5] bg-white p-4 text-center text-[10px] uppercase tracking-[0.18em] text-[#64748b]">
             v1.0.2
@@ -1601,9 +2241,21 @@ function DashboardEmptyLine({ message }: { message: string }) {
 function CreateProjectScreen({
   onCancel,
   onCreated,
+  onLogout,
+  onProfileClick,
+  onNotification,
+  notifications = [],
+  showNotifications,
+  onShowNotifications,
 }: {
   onCancel: () => void;
-  onCreated: () => void;
+  onCreated: (projectId: string) => void;
+  onLogout?: () => void;
+  onProfileClick?: () => void;
+  onNotification?: (title: string, message: string, type?: "info" | "success" | "warning" | "error") => void;
+  notifications?: Notification[];
+  showNotifications?: boolean;
+  onShowNotifications?: (show: boolean) => void;
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -1637,7 +2289,7 @@ function CreateProjectScreen({
         return;
       }
 
-      onCreated();
+      onCreated(project.id);
     } catch (error: unknown) {
       const message =
         error instanceof Error
@@ -1653,7 +2305,7 @@ function CreateProjectScreen({
 
   return (
     <>
-      <Header compact title="Create Project" />
+      <Header compact title="Create Project" onLogout={onLogout} onProfileClick={onProfileClick} onNotification={onNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={onShowNotifications} />
       <main className="mx-auto max-w-[430px] px-5 py-6">
         <Card className="rounded-lg border-[#c4c6cf] bg-white shadow-sm">
           <CardContent className="space-y-6 p-6">
@@ -1800,10 +2452,111 @@ function Milestone({
   );
 }
 
-function FilesScreen() {
+function FilesScreen({ onLogout, onProfileClick, onNotification, notifications = [], showNotifications, onShowNotifications }: { onLogout?: () => void; onProfileClick?: () => void; onNotification?: (title: string, message: string, type?: "info" | "success" | "warning" | "error") => void; notifications?: Notification[]; showNotifications?: boolean; onShowNotifications?: (show: boolean) => void; }) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadMessage, setUploadMessage] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [project, setProject] = useState<DashboardProject | null>(null);
+  const [manuscriptFiles, setManuscriptFiles] = useState<ManuscriptFile[]>([]);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState("");
+  const [discussion, setDiscussion] = useState<DiscussionEntry[]>([]);
+  const [newComment, setNewComment] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadFiles() {
+      if (!isSupabaseConfigured) {
+        throw new Error("Supabase is not configured. Please add your Supabase keys in .env.");
+      }
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user?.id) {
+        throw new Error(userError?.message || "Unable to load user session.");
+      }
+
+      const userId = userData.user.id;
+      const currentProject = await fetchFirstProjectForUser(userId);
+      if (!currentProject) {
+        return {
+          project: null,
+          files: [] as ManuscriptFile[],
+          activePath: null,
+          previewUrl: null,
+          error: "No thesis project found. Create a project to upload manuscripts.",
+        };
+      }
+
+      const files = await fetchProjectManuscriptFiles(currentProject.id, userId);
+      const activePath = files[0]?.path ?? null;
+
+      return {
+        project: currentProject,
+        files,
+        activePath,
+        previewUrl: null,
+        error: null,
+      };
+    }
+
+    loadFiles()
+      .then((result) => {
+        if (!active) {
+          return;
+        }
+
+        setProject(result.project);
+        setManuscriptFiles(result.files);
+        setActiveFilePath(result.activePath);
+        setPreviewUrl(result.previewUrl);
+        setError(result.error);
+      })
+      .catch((err) => {
+        if (!active) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function refreshPreview() {
+      if (!active) {
+        return;
+      }
+
+      if (!activeFilePath || !isSupabaseConfigured) {
+        setPreviewUrl(null);
+        return;
+      }
+
+      const url = await createSignedManuscriptUrl(activeFilePath);
+      if (active) {
+        setPreviewUrl(url);
+      }
+    }
+
+    refreshPreview();
+
+    return () => {
+      active = false;
+    };
+  }, [activeFilePath]);
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     setUploadMessage("");
@@ -1811,25 +2564,161 @@ function FilesScreen() {
     setSelectedFile(file);
   }
 
-  async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedFile) {
-      setUploadMessage("Please select a manuscript file before uploading.");
+  async function refreshFiles() {
+    if (!isSupabaseConfigured) {
+      setError("Supabase is not configured. Please add your Supabase keys in .env.");
+      return;
+    }
+
+    setIsLoading(true);
+    setRefreshMessage("");
+    setError(null);
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user?.id) {
+        throw new Error(userError?.message || "Unable to load user session.");
+      }
+
+      const userId = userData.user.id;
+      if (!project) {
+        throw new Error("No active project available to refresh manuscript drafts.");
+      }
+
+      const files = await fetchProjectManuscriptFiles(project.id, userId);
+      setManuscriptFiles(files);
+      setActiveFilePath(files[0]?.path ?? null);
+      setRefreshMessage("Draft history refreshed.");
+      setError(files.length === 0 ? "No manuscript drafts found." : null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleDeleteDraft(filePath: string) {
+    if (!project) {
+      setUploadMessage("No project available to delete drafts.");
       return;
     }
 
     setIsUploading(true);
     setUploadMessage("");
 
-    await new Promise((resolve) => window.setTimeout(resolve, 1000));
-    setUploadMessage(`Uploaded ${selectedFile.name}.`);
-    setIsUploading(false);
-    setSelectedFile(null);
+    try {
+      const { error: deleteError } = await supabase.storage.from("thesis-documents").remove([filePath]);
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      const updatedFiles = manuscriptFiles.filter((file) => file.path !== filePath);
+      setManuscriptFiles(updatedFiles);
+      setActiveFilePath((current) => (current === filePath ? updatedFiles[0]?.path ?? null : current));
+      setUploadMessage("Draft deleted successfully.");
+      onNotification?.("Draft deleted", "The selected manuscript draft was removed.", "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setUploadMessage(`Delete failed: ${message}`);
+      onNotification?.("Delete failed", message, "error");
+    } finally {
+      setIsUploading(false);
+    }
   }
+
+  function handlePostComment() {
+    const trimmed = newComment.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setDiscussion((current) => [
+      {
+        id: `${Date.now()}`,
+        author: "You",
+        message: trimmed,
+        time: "Just now",
+      },
+      ...current,
+    ]);
+    setNewComment("");
+    onNotification?.("Comment posted", "Your note has been added to the discussion thread.", "success");
+  }
+
+  async function handleUpload(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedFile) {
+      setUploadMessage("Please select a manuscript file before uploading.");
+      return;
+    }
+
+    if (!project) {
+      setUploadMessage("Create a thesis project before uploading a manuscript.");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadMessage("");
+
+    try {
+      if (!isSupabaseConfigured) {
+        throw new Error("Supabase is not configured. Please add your Supabase keys in .env.");
+      }
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+
+      if (userError || !userId) {
+        throw new Error(userError?.message || "Unable to identify current user.");
+      }
+
+      const filePath = `${project.id}/${userId}/${selectedFile.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("thesis-documents")
+        .upload(filePath, selectedFile, { upsert: true });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const files = await fetchProjectManuscriptFiles(project.id, userId);
+      const activePath = files[0]?.path ?? null;
+
+      setManuscriptFiles(files);
+      setActiveFilePath(activePath);
+      setSelectedFile(null);
+      setUploadMessage(`Uploaded ${selectedFile.name}.`);
+      onNotification?.("Upload complete", "Your manuscript draft was uploaded successfully.", "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setUploadMessage(`Upload failed: ${message}`);
+      onNotification?.("Upload failed", message, "error");
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  const currentFile = manuscriptFiles.find((file) => file.path === activeFilePath) ?? manuscriptFiles[0] ?? null;
+  const currentFileLabel = currentFile
+    ? `${currentFile.name} · ${currentFile.updatedAt ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(currentFile.updatedAt) : "recently"}`
+    : "No manuscript uploaded yet.";
+  const fileCountLabel = manuscriptFiles.length > 0 ? `${manuscriptFiles.length} draft${manuscriptFiles.length === 1 ? "" : "s"} uploaded` : "No manuscript drafts yet.";
+  const lastUploadText = currentFile
+    ? `Last uploaded ${currentFile.updatedAt ? new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(currentFile.updatedAt) : "recently"}`
+    : "No file uploaded this session.";
+  const pagesText = currentFile && currentFile.size ? `${Math.max(1, Math.round(currentFile.size / 120000))} pages (estimated)` : "Page count unavailable.";
+  const statusText = isLoading
+    ? "Loading manuscript data…"
+    : error
+      ? "Upload a draft to begin review."
+      : currentFile
+      ? "Awaiting review"
+      : "Ready to upload your first draft.";
 
   return (
     <>
-      <Header title="Manuscript" />
+      <Header title="Manuscript" onLogout={onLogout} onProfileClick={onProfileClick} onNotification={onNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={onShowNotifications} />
       <main className="grid gap-6 px-4 pb-28 pt-5 lg:grid-cols-12 md:px-8">
         <section className="flex flex-col gap-4 lg:col-span-7">
           <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
@@ -1842,13 +2731,12 @@ function FilesScreen() {
                   Upload and review your latest draft
                 </h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-[#475569]">
-                  Keep your advisor feedback, revision actions, and file history in one document
-                  centered workspace.
+                  Keep your advisor feedback, revision actions, and file history in one document-centered workspace.
                 </p>
               </div>
               <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569] shadow-inner">
                 <p className="font-semibold text-[#0f172a]">Current file</p>
-                <p className="mt-2">No manuscript uploaded yet.</p>
+                <p className="mt-2 text-sm text-[#0f172a]">{isLoading ? "Loading manuscript status…" : currentFileLabel}</p>
                 <p className="mt-3 text-xs text-[#64748b]">
                   Accepted formats: PDF, DOC, DOCX
                 </p>
@@ -1866,11 +2754,16 @@ function FilesScreen() {
                   <div>
                     <h3 className="text-lg font-semibold text-[#0f172a]">Upload Latest Manuscript</h3>
                     <p className="text-sm text-[#475569]">
-                      Upload your current draft and track reviewer feedback instantly.
+                      Upload your current draft and keep the project storage in sync.
                     </p>
                   </div>
                 </div>
-                <Button className="h-11 rounded-full bg-[#002045] px-5 text-sm font-semibold text-white hover:bg-[#1a365d]/90" type="submit" disabled={isUploading} form="manuscript-upload">
+                <Button
+                  className="h-11 rounded-full bg-[#002045] px-5 text-sm font-semibold text-white hover:bg-[#1a365d]/90"
+                  type="submit"
+                  disabled={isUploading || !project}
+                  form="manuscript-upload"
+                >
                   {isUploading ? "Uploading..." : "Upload"}
                 </Button>
               </div>
@@ -1904,20 +2797,39 @@ function FilesScreen() {
                 <Button className="size-9 rounded-full p-0 text-[#0f172a] hover:bg-[#f1f5f9]" size="icon" variant="ghost">
                   <ZoomOut className="size-4" />
                 </Button>
-                <Button className="h-9 gap-2 rounded-full border border-[#c4c6cf] px-3 text-xs font-semibold text-[#0f172a] hover:bg-[#f8fafc]" variant="outline">
-                  <ExternalLink className="size-3" />
-                  Fullscreen
+                <Button asChild className="h-9 gap-2 rounded-full border border-[#c4c6cf] px-3 text-xs font-semibold text-[#0f172a] hover:bg-[#f8fafc]" variant="outline">
+                  <a href={previewUrl ?? "#"} target="_blank" rel="noreferrer" aria-disabled={!previewUrl}>
+                    <ExternalLink className="size-3" />
+                    Fullscreen
+                  </a>
                 </Button>
               </div>
             </div>
             <CardContent className="min-h-[420px] p-6">
-              <div className="flex h-full flex-col items-center justify-center rounded-[2rem] border border-dashed border-[#c4c6cf] bg-[#f8fafc] text-center text-[#475569]">
-                <FileText className="mb-4 size-14 text-[#94a3b8]" />
-                <p className="text-lg font-semibold text-[#0f172a]">No manuscript selected</p>
-                <p className="mt-2 max-w-xs text-sm leading-6">
-                  Upload your latest draft to preview the first pages and advisor comments here.
-                </p>
-              </div>
+              {previewUrl && currentFile ? (
+                <div className="flex h-full flex-col justify-center rounded-[2rem] border border-dashed border-[#c4c6cf] bg-[#f8fafc] p-6 text-center text-[#475569]">
+                  <div className="mb-4">
+                    <p className="text-sm uppercase tracking-[0.18em] text-[#1960a3]">Latest draft</p>
+                    <p className="mt-2 text-lg font-semibold text-[#0f172a]">{currentFile.name}</p>
+                    <p className="mt-1 text-sm text-[#64748b]">{currentFileLabel}</p>
+                  </div>
+                  <div className="mt-6">
+                    <Button asChild className="h-11 rounded-full bg-[#002045] px-6 text-sm font-semibold text-white hover:bg-[#1a365d]/90">
+                      <a href={previewUrl} target="_blank" rel="noreferrer">
+                        View latest draft
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center rounded-[2rem] border border-dashed border-[#c4c6cf] bg-[#f8fafc] text-center text-[#475569]">
+                  <FileText className="mb-4 size-14 text-[#94a3b8]" />
+                  <p className="text-lg font-semibold text-[#0f172a]">No manuscript selected</p>
+                  <p className="mt-2 max-w-xs text-sm leading-6">
+                    Upload your latest draft to preview the first pages and advisor comments here.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </section>
@@ -1927,22 +2839,95 @@ function FilesScreen() {
             <CardContent className="space-y-4 p-6">
               <div className="space-y-2">
                 <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#74777f]">Manuscript status</p>
-                <h3 className="text-xl font-semibold text-[#181c1e]">Awaiting review</h3>
+                <h3 className="text-xl font-semibold text-[#181c1e]">{statusText}</h3>
               </div>
               <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
                 <p className="font-semibold text-[#0f172a]">Last upload</p>
-                <p className="mt-2">No file uploaded this session.</p>
+                <p className="mt-2">{lastUploadText}</p>
               </div>
               <div className="grid gap-3 text-sm text-[#475569]">
                 <div className="rounded-3xl bg-[#f8fafc] p-4">
-                  <p className="font-semibold text-[#0f172a]">Next review</p>
-                  <p className="mt-1">Advisor feedback due in 2 days.</p>
+                  <p className="font-semibold text-[#0f172a]">Project</p>
+                  <p className="mt-1">{project?.title ?? "No project connected."}</p>
+                </div>
+                <div className="rounded-3xl bg-[#f8fafc] p-4">
+                  <p className="font-semibold text-[#0f172a]">Drafts</p>
+                  <p className="mt-1">{fileCountLabel}</p>
                 </div>
                 <div className="rounded-3xl bg-[#f8fafc] p-4">
                   <p className="font-semibold text-[#0f172a]">Pages</p>
-                  <p className="mt-1">42 pages in the current draft.</p>
+                  <p className="mt-1">{pagesText}</p>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
+            <div className="flex flex-col gap-4 border-b border-[#e2e8f0] p-6 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-[#74777f]">
+                  Draft history
+                </h3>
+                <p className="mt-2 text-xs text-[#64748b]">Select a previous draft to preview or remove obsolete versions.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {refreshMessage ? (
+                  <span className="rounded-full bg-[#ecfdf5] px-3 py-2 text-xs font-semibold text-[#166534]">
+                    {refreshMessage}
+                  </span>
+                ) : null}
+                <Button
+                  className="h-10 rounded-full bg-[#002045] px-4 text-xs font-semibold text-white hover:bg-[#1a365d]/90"
+                  onClick={refreshFiles}
+                  disabled={isLoading}
+                >
+                  Refresh
+                </Button>
+              </div>
+            </div>
+            <CardContent className="space-y-3 p-6">
+              {manuscriptFiles.length > 0 ? (
+                manuscriptFiles.map((file) => (
+                  <div
+                    key={file.id}
+                    className={cn(
+                      "flex flex-col gap-3 rounded-3xl border p-4 transition",
+                      file.path === activeFilePath
+                        ? "border-[#002045] bg-[#eff6ff]"
+                        : "border-[#e2e8f0] bg-[#f8fafc] hover:border-[#1960a3]",
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setActiveFilePath(file.path)}
+                        className="min-w-0 text-left"
+                      >
+                        <p className="truncate text-sm font-semibold text-[#0f172a]">{file.name}</p>
+                        <p className="mt-1 text-xs leading-5 text-[#64748b]">
+                          {file.updatedAt ? formatRelativeDate(file.updatedAt) : "No date available"}
+                        </p>
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <span className="shrink-0 text-[11px] font-semibold text-[#64748b]">
+                          {file.size ? `${Math.round(file.size / 1024)} KB` : "Unknown size"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDraft(file.path)}
+                          className="rounded-full border border-[#c4c6cf] bg-white px-3 py-1 text-[11px] font-semibold text-[#b91c1c] transition hover:bg-[#fee2e2]"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-3xl bg-[#f8fafc] p-6 text-sm text-[#475569]">
+                  No manuscript drafts uploaded yet. Use the upload area to add your first file.
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -1953,45 +2938,51 @@ function FilesScreen() {
               </h3>
             </div>
             <CardContent className="flex-1 space-y-6 overflow-y-auto p-6">
-              <div className="flex gap-4">
-                <Avatar name="Dr. Sarah" className="size-10 border border-[#c4c6cf]" />
-                <div className="flex-1">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm font-bold text-[#002045]">Dr. Sarah Thompson</p>
-                    <span className="shrink-0 text-xs font-semibold text-[#74777f]">3 hours ago</span>
-                  </div>
-                  <div className="mt-2 rounded-[1.5rem] border border-[#c4c6cf] bg-[#f1f4f6] p-4">
-                    <p className="text-base leading-6 text-[#181c1e]">
-                      Please revise Chapter 2 methodology and add related studies. The current
-                      approach lacks empirical depth for the 2024 scope.
-                    </p>
+              {discussion.map((entry) => (
+                <div
+                  key={entry.id}
+                  className={cn(
+                    "flex gap-4",
+                    entry.author === "You" ? "flex-row-reverse" : "flex-row",
+                  )}
+                >
+                  <Avatar
+                    name={entry.author}
+                    className={cn(
+                      "size-10 shrink-0",
+                      entry.author === "You" ? "bg-[#1a365d] text-white" : "border border-[#c4c6cf]",
+                    )}
+                  />
+                  <div className="flex-1">
+                    <div className={cn("flex items-start justify-between gap-3", entry.author === "You" ? "flex-row-reverse" : "")}> 
+                      <p className={cn("text-sm font-bold", entry.author === "You" ? "text-[#1960a3]" : "text-[#002045]")}>{entry.author}</p>
+                      <span className="text-xs font-semibold text-[#74777f]">{entry.time}</span>
+                    </div>
+                    <div className={cn(
+                      "mt-2 rounded-[1.5rem] border p-4",
+                      entry.author === "You" ? "border-[#7db6ff] bg-[#7db6ff]/10" : "border-[#c4c6cf] bg-[#f1f4f6]",
+                    )}
+                    >
+                      <p className="text-base leading-6 text-[#181c1e]">{entry.message}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="flex flex-row-reverse gap-4">
-                <Avatar name="You" className="size-10 shrink-0 bg-[#1a365d] text-white" />
-                <div className="flex-1">
-                  <div className="flex flex-row-reverse items-start justify-between gap-3">
-                    <p className="text-sm font-bold text-[#1960a3]">You</p>
-                    <span className="text-xs font-semibold text-[#74777f]">1 hour ago</span>
-                  </div>
-                  <div className="mt-2 rounded-[1.5rem] border border-[#7db6ff] bg-[#7db6ff]/10 p-4">
-                    <p className="text-base leading-6 text-[#181c1e]">
-                      Noted, Dr. Thompson. I will add the Smith and Wesson (2023) studies to
-                      strengthen the framework.
-                    </p>
-                  </div>
-                </div>
-              </div>
+              ))}
             </CardContent>
             <div className="rounded-b-3xl border-t border-[#e2e8f0] bg-[#f8fafc] p-6">
               <textarea
                 className="h-24 w-full resize-none rounded-3xl border border-[#c4c6cf] bg-white p-4 text-base leading-6 outline-none transition-all focus:border-[#1960a3] focus:ring-0"
                 placeholder="Post a comment..."
+                value={newComment}
+                onChange={(event) => setNewComment(event.target.value)}
               />
-              <div className="mt-4 flex justify-end">
-                <Button className="h-11 rounded-full bg-[#002045] px-6 text-sm font-medium text-white hover:bg-[#002045]/90">
+              <div className="mt-4 flex justify-between items-center gap-3">
+                <p className="text-xs text-[#64748b]">Keep the thesis discussion visible for your advisor and review team.</p>
+                <Button
+                  className="h-11 rounded-full bg-[#002045] px-6 text-sm font-medium text-white hover:bg-[#002045]/90"
+                  onClick={handlePostComment}
+                  type="button"
+                >
                   <Send className="size-4" />
                   Post Comment
                 </Button>
@@ -2004,34 +2995,134 @@ function FilesScreen() {
   );
 }
 
-function TasksScreen() {
-  const timelineItems = [
-    {
-      title: "Research methodology review",
-      description: "Finalize research approach and validate measurement plan with your advisor.",
-      status: "Upcoming",
-      date: "Oct 24, 2023",
-      accent: "bg-[#fef3c7] text-[#92400e]",
-    },
-    {
-      title: "Database schema approval",
-      description: "Confirm the schema with your technical committee and prepare sample dataset.",
-      status: "In Progress",
-      date: "Oct 20, 2023",
-      accent: "bg-[#dbeafe] text-[#1d4ed8]",
-    },
-    {
-      title: "Chapter 1 draft complete",
-      description: "Submit the first chapter draft and collect reviewer feedback.",
-      status: "Completed",
-      date: "Oct 14, 2023",
-      accent: "bg-[#dcfce7] text-[#166534]",
-    },
-  ];
+function TasksScreen({ onLogout, onProfileClick, onNotification, notifications = [], showNotifications, onShowNotifications }: { onLogout?: () => void; onProfileClick?: () => void; onNotification?: (title: string, message: string, type?: "info" | "success" | "warning" | "error") => void; notifications?: Notification[]; showNotifications?: boolean; onShowNotifications?: (show: boolean) => void; }) {
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
+  const [projectName, setProjectName] = useState("Timeline");
+  const [progress, setProgress] = useState(0);
+  const [onTrackCount, setOnTrackCount] = useState(0);
+  const [awaitingReviewCount, setAwaitingReviewCount] = useState(0);
+  const [completedCount, setCompletedCount] = useState(0);
+  const [nextDeadlineLabel, setNextDeadlineLabel] = useState("No upcoming deadlines");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadTimeline() {
+      if (!isSupabaseConfigured) {
+        throw new Error("Supabase is not configured. Please add your Supabase keys in .env.");
+      }
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user?.id) {
+        throw new Error(userError?.message || "Unable to load user session.");
+      }
+
+      const project = await fetchFirstProjectForUser(userData.user.id);
+      if (!project) {
+        return {
+          timelineItems: [] as TimelineItem[],
+          projectName: "No project",
+          progress: 0,
+          onTrackCount: 0,
+          awaitingReviewCount: 0,
+          completedCount: 0,
+          nextDeadlineLabel: "Create a project to see your timeline.",
+        };
+      }
+
+      const [taskRows, milestoneRows] = await Promise.all([
+        fetchProjectRows("tasks", project.id, "due_date"),
+        fetchProjectRows("milestones", project.id, "created_at"),
+      ]);
+
+      const timeline = [
+        ...milestoneRows.map((row, index) => normalizeTimelineItem(row, "milestone", index)),
+        ...taskRows.map((row, index) => normalizeTimelineItem(row, "task", index)),
+      ].sort((first, second) => {
+        if (first.date && second.date) {
+          return first.date.getTime() - second.date.getTime();
+        }
+        if (first.date) {
+          return -1;
+        }
+        if (second.date) {
+          return 1;
+        }
+        return first.id.localeCompare(second.id);
+      });
+
+      const nextDeadline = taskRows
+        .map(normalizeDeadline)
+        .filter((deadline): deadline is DashboardDeadline => Boolean(deadline))
+        .filter((deadline) => deadline.daysLeft >= 0)
+        .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())[0];
+
+      const counts = timeline.reduce(
+        (acc, item) => {
+          const normalizedStatus = item.status.toLowerCase();
+          if (/(done|completed)/i.test(normalizedStatus)) {
+            acc.completed += 1;
+          } else if (/(review|awaiting)/i.test(normalizedStatus)) {
+            acc.awaitingReview += 1;
+          } else {
+            acc.onTrack += 1;
+          }
+          return acc;
+        },
+        { onTrack: 0, awaitingReview: 0, completed: 0 },
+      );
+
+      return {
+        timelineItems: timeline,
+        projectName: project.title,
+        progress: deriveProgress(project, taskRows),
+        onTrackCount: counts.onTrack,
+        awaitingReviewCount: counts.awaitingReview,
+        completedCount: counts.completed,
+        nextDeadlineLabel: nextDeadline
+          ? `${nextDeadline.title} — ${nextDeadline.daysLeft === 0 ? "Today" : nextDeadline.daysLeft === 1 ? "1 day left" : `${nextDeadline.daysLeft} days left`}`
+          : "No upcoming deadlines",
+      };
+    }
+
+    loadTimeline()
+      .then((result) => {
+        if (!active) {
+          return;
+        }
+        setTimelineItems(result.timelineItems);
+        setProjectName(result.projectName);
+        setProgress(result.progress);
+        setOnTrackCount(result.onTrackCount);
+        setAwaitingReviewCount(result.awaitingReviewCount);
+        setCompletedCount(result.completedCount);
+        setNextDeadlineLabel(result.nextDeadlineLabel);
+        setError(null);
+      })
+      .catch((err) => {
+        if (!active) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const snapshotTitle = projectName === "No project" ? "Timeline snapshot" : `${projectName} snapshot`;
 
   return (
     <>
-      <Header title="Timeline" />
+      <Header title="Timeline" onLogout={onLogout} onProfileClick={onProfileClick} onNotification={onNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={onShowNotifications} />
       <main className="relative px-4 pb-28 pt-4 md:px-8 md:pt-6">
         <section className="mb-6 space-y-6">
           <div>
@@ -2047,20 +3138,28 @@ function TasksScreen() {
             <CardContent className="grid gap-4 sm:grid-cols-[1.5fr_1fr] items-center">
               <div>
                 <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#1960a3]">
-                  Timeline snapshot
+                  {snapshotTitle}
                 </p>
                 <p className="mt-2 text-lg font-semibold text-[#0f172a]">
-                  3 milestone stages due this week.
+                  {isLoading
+                    ? "Loading your timeline..."
+                    : error
+                      ? "Unable to load timeline"
+                      : `${timelineItems.length} upcoming items`}
                 </p>
               </div>
               <div className="grid gap-2 rounded-2xl bg-[#f8fafc] p-4">
                 <div className="flex items-center justify-between text-sm text-[#475569]">
                   <span>On track</span>
-                  <span className="font-semibold text-[#0f172a]">2</span>
+                  <span className="font-semibold text-[#0f172a]">{onTrackCount}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm text-[#475569]">
                   <span>Awaiting review</span>
-                  <span className="font-semibold text-[#0f172a]">1</span>
+                  <span className="font-semibold text-[#0f172a]">{awaitingReviewCount}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm text-[#475569]">
+                  <span>Completed</span>
+                  <span className="font-semibold text-[#0f172a]">{completedCount}</span>
                 </div>
               </div>
             </CardContent>
@@ -2082,26 +3181,45 @@ function TasksScreen() {
                 </Button>
               </div>
 
-              <div className="relative space-y-6">
-                <div className="absolute left-5 top-0 h-full w-px bg-[#c4c6cf]" />
-                {timelineItems.map((item) => (
-                  <div key={item.title} className="relative pl-10">
-                    <div className="absolute left-0 top-2 flex h-10 w-10 items-center justify-center rounded-full bg-white ring-1 ring-[#c4c6cf] shadow-sm">
-                      <span className="text-sm font-semibold text-[#0f172a]">{item.date.split(" ")[0]}</span>
-                    </div>
-                    <div className="rounded-3xl border border-[#e5e7eb] bg-[#f8fafc] p-5 shadow-sm">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${item.accent}`}>
-                          {item.status}
-                        </span>
-                        <span className="text-sm text-[#64748b]">{item.date}</span>
-                      </div>
-                      <h4 className="mt-3 text-lg font-semibold text-[#181c1e]">{item.title}</h4>
-                      <p className="mt-2 text-sm leading-6 text-[#475569]">{item.description}</p>
-                    </div>
+              {isLoading ? (
+                <div className="rounded-3xl border border-[#e5e7eb] bg-[#f8fafc] p-8 text-center text-sm text-[#64748b]">
+                  Loading timeline items...
+                </div>
+              ) : error ? (
+                <div className="space-y-4">
+                  <div className="rounded-3xl border border-[#e5e7eb] bg-[#fef2f2] p-6 text-sm text-[#b91c1c]">
+                    {error}
                   </div>
-                ))}
-              </div>
+                  <Button className="h-12 rounded-lg bg-[#1a365d] text-sm font-semibold text-white hover:bg-[#002045]" onClick={() => window.location.reload()}>
+                    Reload timeline
+                  </Button>
+                </div>
+              ) : timelineItems.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-[#c4c6cf] bg-[#f8fafc] p-10 text-center text-sm text-[#64748b]">
+                  No timeline items were found. Create a thesis project and add tasks or milestones to populate this view.
+                </div>
+              ) : (
+                <div className="relative space-y-6">
+                  <div className="absolute left-5 top-0 h-full w-px bg-[#c4c6cf]" />
+                  {timelineItems.map((item) => (
+                    <div key={item.id} className="relative pl-10">
+                      <div className="absolute left-0 top-2 flex h-10 w-10 items-center justify-center rounded-full bg-white ring-1 ring-[#c4c6cf] shadow-sm">
+                        <span className="text-sm font-semibold text-[#0f172a]">{item.dateLabel.split(" ")[0]}</span>
+                      </div>
+                      <div className="rounded-3xl border border-[#e5e7eb] bg-[#f8fafc] p-5 shadow-sm">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${item.accent}`}>
+                            {item.status}
+                          </span>
+                          <span className="text-sm text-[#64748b]">{item.dateLabel}</span>
+                        </div>
+                        <h4 className="mt-3 text-lg font-semibold text-[#181c1e]">{item.title}</h4>
+                        <p className="mt-2 text-sm leading-6 text-[#475569]">{item.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -2114,14 +3232,14 @@ function TasksScreen() {
               <div className="mt-6 space-y-4">
                 <div>
                   <div className="mb-2 flex items-center justify-between text-sm text-[#475569]">
-                    <span>Chapter completion</span>
-                    <span className="font-semibold text-[#0f172a]">32%</span>
+                    <span>Project completion</span>
+                    <span className="font-semibold text-[#0f172a]">{progress}%</span>
                   </div>
-                  <Progress className="h-3 bg-[#e2e8f0]" indicatorClassName="bg-[#74db9d]" value={32} />
+                  <Progress className="h-3 bg-[#e2e8f0]" indicatorClassName="bg-[#74db9d]" value={progress} />
                 </div>
                 <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
                   <p className="font-semibold text-[#0f172a]">Next deadline</p>
-                  <p className="mt-1">Chapter 2 First Draft — 4 days left</p>
+                  <p className="mt-1">{nextDeadlineLabel}</p>
                 </div>
               </div>
             </Card>
@@ -2130,12 +3248,12 @@ function TasksScreen() {
               <h3 className="text-lg font-semibold text-[#181c1e]">Team status</h3>
               <div className="mt-4 space-y-3 text-sm text-[#475569]">
                 <div className="rounded-2xl bg-[#f8fafc] p-4">
-                  <p className="font-semibold text-[#0f172a]">Maria</p>
-                  <p>Design milestone due in 2 days.</p>
+                  <p className="font-semibold text-[#0f172a]">Tasks on track</p>
+                  <p>{onTrackCount} task{onTrackCount === 1 ? "" : "s"} are moving forward.</p>
                 </div>
                 <div className="rounded-2xl bg-[#f8fafc] p-4">
-                  <p className="font-semibold text-[#0f172a]">Earl</p>
-                  <p>Database schema under review.</p>
+                  <p className="font-semibold text-[#0f172a]">Awaiting review</p>
+                  <p>{awaitingReviewCount} item{awaitingReviewCount === 1 ? "" : "s"} require approval.</p>
                 </div>
               </div>
             </Card>
@@ -2251,18 +3369,77 @@ function TaskCard({
   );
 }
 
-function MeetingsScreen() {
+function MeetingsScreen({ onLogout, onProfileClick, onNotification, notifications = [], showNotifications, onShowNotifications }: { onLogout?: () => void; onProfileClick?: () => void; onNotification?: (title: string, message: string, type?: "info" | "success" | "warning" | "error") => void; notifications?: Notification[]; showNotifications?: boolean; onShowNotifications?: (show: boolean) => void; }) {
   const [requestSent, setRequestSent] = useState(false);
+  const [meetingPurpose, setMeetingPurpose] = useState("Review Chapter 3");
+  const [meetingDate, setMeetingDate] = useState("");
+  const [meetingTime, setMeetingTime] = useState("");
+  const [meetingRequests, setMeetingRequests] = useState<MeetingEntry[]>([]);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [discussion, setDiscussion] = useState<DiscussionEntry[]>([
+    {
+      id: "advisor-1",
+      author: "Dr. Helena Vance",
+      message: "Please send the revised chapter draft before the consultation so I can review your changes in advance.",
+      time: "2 hours ago",
+    },
+    {
+      id: "you-1",
+      author: "You",
+      message: "I will upload the latest draft today and confirm the time once the advisor replies.",
+      time: "1 hour ago",
+    },
+  ]);
+  const [discussionMessage, setDiscussionMessage] = useState("");
 
   function handleMeetingSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const title = meetingPurpose.trim() || "Advisor consultation";
+    const date = meetingDate || "TBD";
+    const time = meetingTime || "TBD";
+    const newMeeting: MeetingEntry = {
+      id: `${Date.now()}`,
+      title,
+      date: `${date} ${meetingTime ? `• ${time}` : ""}`.trim(),
+      person: "Dr. Helena Vance",
+      status: "Pending",
+      icon: CalendarCheck,
+    };
+
+    setMeetingRequests((current) => [newMeeting, ...current]);
     setRequestSent(true);
-    window.setTimeout(() => setRequestSent(false), 2000);
+    setStatusMessage("Meeting request sent. Your advisor will confirm shortly.");
+    onNotification?.("Consultation requested", "Your meeting request was sent successfully.", "success");
+
+    window.setTimeout(() => {
+      setRequestSent(false);
+      setStatusMessage("");
+    }, 3000);
+  }
+
+  function handleSendDiscussionMessage() {
+    const trimmed = discussionMessage.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setDiscussion((current) => [
+      {
+        id: `${Date.now()}`,
+        author: "You",
+        message: trimmed,
+        time: "Just now",
+      },
+      ...current,
+    ]);
+    setDiscussionMessage("");
+    onNotification?.("Message sent", "Your discussion note was added.", "success");
   }
 
   return (
     <>
-      <Header title="Collaboration" />
+      <Header title="Collaboration" onLogout={onLogout} onProfileClick={onProfileClick} onNotification={onNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={onShowNotifications} />
       <main className="grid gap-6 px-4 pb-28 pt-5 lg:grid-cols-12 md:px-8">
         <section className="space-y-6 lg:col-span-5">
           <div>
@@ -2291,7 +3468,8 @@ function MeetingsScreen() {
                   </span>
                   <Input
                     className="h-11 rounded-3xl border border-[#c4c6cf] bg-[#f8fafc] px-4 py-3 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
-                    defaultValue="Review Chapter 3"
+                    value={meetingPurpose}
+                    onChange={(event) => setMeetingPurpose(event.target.value)}
                     placeholder="e.g., Literature Review Feedback"
                     type="text"
                   />
@@ -2306,6 +3484,8 @@ function MeetingsScreen() {
                       <Input
                         className="h-11 rounded-3xl border border-[#c4c6cf] bg-[#f8fafc] px-4 py-3 pr-10 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
                         type="date"
+                        value={meetingDate}
+                        onChange={(event) => setMeetingDate(event.target.value)}
                       />
                       <Calendar className="pointer-events-none absolute right-3 top-3 size-5 text-[#74777f]" />
                     </div>
@@ -2318,11 +3498,19 @@ function MeetingsScreen() {
                       <Input
                         className="h-11 rounded-3xl border border-[#c4c6cf] bg-[#f8fafc] px-4 py-3 pr-10 text-base shadow-none transition-all focus-visible:border-[#1960a3] focus-visible:ring-0 focus-visible:ring-offset-0"
                         type="time"
+                        value={meetingTime}
+                        onChange={(event) => setMeetingTime(event.target.value)}
                       />
                       <Clock3 className="pointer-events-none absolute right-3 top-3 size-5 text-[#74777f]" />
                     </div>
                   </label>
                 </div>
+
+                {statusMessage ? (
+                  <p className="rounded-3xl border border-[#d1fae5] bg-[#ecfdf5] px-4 py-3 text-sm text-[#166534]">
+                    {statusMessage}
+                  </p>
+                ) : null}
 
                 <Button
                   className={cn(
@@ -2349,7 +3537,7 @@ function MeetingsScreen() {
           </div>
         </section>
 
-        <section className="lg:col-span-7">
+        <section className="lg:col-span-7 space-y-6">
           <Card className="overflow-hidden rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-[#e2e8f0] px-6 py-5">
               <div>
@@ -2361,12 +3549,272 @@ function MeetingsScreen() {
               </button>
             </div>
             <CardContent className="divide-y divide-[#e2e8f0] p-0">
-              {meetings.map((item) => (
-                <MeetingRow key={item.title} item={item} />
-              ))}
+              {meetingRequests.length > 0 ? (
+                meetingRequests.map((item) => (
+                  <MeetingRow key={item.id} item={item} />
+                ))
+              ) : (
+                <div className="p-10 text-center text-sm text-[#64748b]">
+                  No meetings scheduled yet. Submit a consultation request to add your first meeting.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-[#e2e8f0] px-6 py-5">
+              <div>
+                <h3 className="text-lg font-semibold text-[#181c1e]">Discussion Thread</h3>
+                <p className="text-sm text-[#64748b]">Keep advisor feedback and your notes in one place.</p>
+              </div>
+              <Badge className="rounded-full bg-[#eef2ff] px-3 py-1 text-xs font-semibold text-[#1d4ed8]">
+                {discussion.length}
+              </Badge>
+            </div>
+            <CardContent className="space-y-4 p-6">
+              <div className="space-y-4">
+                {discussion.length > 0 ? (
+                  discussion.map((entry) => (
+                    <div key={entry.id} className="rounded-3xl border border-[#e2e8f0] bg-[#f8fafc] p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-[#0f172a]">{entry.author}</p>
+                          <p className="text-xs text-[#64748b]">{entry.time}</p>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-sm leading-6 text-[#43474e]">{entry.message}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-3xl border border-dashed border-[#c4c6cf] bg-[#f8fafc] p-6 text-center text-sm text-[#64748b]">
+                    No discussion notes yet. Use this thread to keep advisor feedback and project updates aligned.
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <label className="block space-y-2">
+                  <span className="block text-sm font-semibold text-[#0f172a]">New message</span>
+                  <textarea
+                    className="min-h-[120px] w-full resize-none rounded-3xl border border-[#c4c6cf] bg-[#f8fafc] px-4 py-3 text-sm leading-6 text-[#181c1e] shadow-sm transition-all focus:border-[#1960a3] focus:outline-none focus:ring-0"
+                    placeholder="Add a note for your advisor or record a decision..."
+                    value={discussionMessage}
+                    onChange={(event) => setDiscussionMessage(event.target.value)}
+                  />
+                </label>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-[#64748b]">Messages appear at the top of the thread.</p>
+                  <Button
+                    className="h-11 rounded-3xl bg-[#002045] px-5 text-sm font-semibold text-white hover:bg-[#1a365d]"
+                    onClick={handleSendDiscussionMessage}
+                    type="button"
+                  >
+                    Send Message
+                  </Button>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </section>
+      </main>
+    </>
+  );
+}
+
+function ProfileScreen({ onBack, onLogout, onNotification, notifications = [], showNotifications, onShowNotifications }: { onBack: () => void; onLogout: () => void; onNotification?: (title: string, message: string, type?: "info" | "success" | "warning" | "error") => void; notifications?: Notification[]; showNotifications?: boolean; onShowNotifications?: (show: boolean) => void; }) {
+  const [userName, setUserName] = useState("User");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [role, setRole] = useState("Researcher");
+  const [memberSince, setMemberSince] = useState<string | null>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
+  const [saveNameMessage, setSaveNameMessage] = useState("");
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (!isMounted) {
+        return;
+      }
+
+      const user = data.user;
+      if (!user) {
+        return;
+      }
+
+      const meta = (user.user_metadata ?? {}) as Record<string, any>;
+      const resolvedFullName = meta.full_name ?? meta.name ?? user.email ?? "User";
+      setUserName(resolvedFullName);
+      setFullName(resolvedFullName);
+      setEditName(resolvedFullName);
+      setEmail(user.email ?? "");
+      setStudentId(meta.student_id ?? meta.studentId ?? "");
+      setRole(meta.role ?? role);
+      setMemberSince(user.created_at ?? null);
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  return (
+    <>
+      <Header title="Profile" onLogout={onLogout} onNotification={onNotification} notifications={notifications} showNotifications={showNotifications} onShowNotifications={onShowNotifications} />
+      <main className="grid gap-6 px-4 pb-28 pt-5 md:px-8">
+        <Card className="rounded-3xl border border-[#d7dde3] bg-white shadow-sm">
+          <CardContent className="space-y-6 p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <Avatar name={userName} className="size-16 bg-[#1d4ed8] text-white" />
+              <div className="space-y-2">
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#1960a3]">Profile</p>
+                <div className="flex items-center gap-3">
+                  {isEditingName ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName((e.target as HTMLInputElement).value)}
+                        className="h-10 w-[220px]"
+                        aria-label="Edit full name"
+                      />
+                      <Button
+                        className="h-10"
+                        onClick={async () => {
+                          setSaveNameMessage("");
+                          if (!isSupabaseConfigured) {
+                            setFullName(editName);
+                            setUserName(editName);
+                            setIsEditingName(false);
+                            return;
+                          }
+
+                          setIsSavingName(true);
+                          try {
+                            const { error } = await supabase.auth.updateUser({ data: { full_name: editName, name: editName, display_name: editName } });
+                            if (error) {
+                              setSaveNameMessage(error.message || "Unable to save name.");
+                            } else {
+                              setFullName(editName);
+                              setUserName(editName);
+                              setIsEditingName(false);
+                            }
+                          } catch (err: unknown) {
+                            setSaveNameMessage(err instanceof Error ? err.message : String(err));
+                          } finally {
+                            setIsSavingName(false);
+                          }
+                        }}
+                        disabled={isSavingName}
+                      >
+                        {isSavingName ? "Saving..." : "Save"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-10"
+                        onClick={() => {
+                          setEditName(fullName || userName);
+                          setIsEditingName(false);
+                          setSaveNameMessage("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <h2 className="text-2xl font-semibold text-[#0f172a]">{fullName || userName}</h2>
+                      <button
+                        aria-label="Edit name"
+                        type="button"
+                        onClick={() => setIsEditingName(true)}
+                        className="ml-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#eef2ff] text-[#0f172a] hover:bg-[#e0e7ff]"
+                      >
+                        <PenLine className="size-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+                <p className="text-sm text-[#64748b]">{email || "No email available"}</p>
+                {saveNameMessage ? <p className="text-sm text-red-700">{saveNameMessage}</p> : null}
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[#64748b]">Full name</p>
+                <p className="mt-1 font-semibold text-[#0f172a]">{fullName || userName}</p>
+              </div>
+              <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[#64748b]">Email</p>
+                <p className="mt-1 font-semibold text-[#0f172a]">{email || "—"}</p>
+              </div>
+              <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[#64748b]">Student ID</p>
+                <p className="mt-1 font-semibold text-[#0f172a]">{studentId || "—"}</p>
+              </div>
+              <div className="rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-[#64748b]">Role</p>
+                <p className="mt-1 font-semibold text-[#0f172a]">{role || "Researcher"}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 rounded-3xl bg-[#f8fafc] p-4 text-sm text-[#475569]">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-[#64748b]">Member since</p>
+              <p className="mt-1 font-semibold text-[#0f172a]">{memberSince ? formatRelativeDate(new Date(memberSince)) : "—"}</p>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button className="h-12 w-full rounded-lg bg-[#1a365d] text-white hover:bg-[#002045]" onClick={onBack} type="button">
+                Back to Dashboard
+              </Button>
+              <Button className="h-12 w-full rounded-lg border border-[#dbeafe] bg-white text-sm font-semibold text-[#1d4ed8] hover:bg-[#eff6ff]" onClick={() => setShowLogoutConfirm(true)} type="button">
+                Logout
+              </Button>
+            </div>
+            {showLogoutConfirm && (
+              <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 py-6 sm:items-center sm:py-0">
+                <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl sm:mx-0">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-[#0f172a]">Confirm Logout</h2>
+                      <p className="mt-2 text-sm text-[#475569]">Are you sure you want to logout?</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowLogoutConfirm(false)}
+                      className="rounded-full bg-[#f1f5f9] p-2 text-[#64748b] transition hover:bg-[#e2e8f0]"
+                      aria-label="Close logout confirmation"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                    <Button
+                      className="h-12 w-full rounded-lg bg-[#ef4444] text-white hover:bg-[#dc2626]"
+                      onClick={onLogout}
+                      type="button"
+                    >
+                      Yes, logout
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-12 w-full rounded-lg border-[#c4c6cf] bg-white text-[#475569] hover:bg-[#f8fafc]"
+                      onClick={() => setShowLogoutConfirm(false)}
+                      type="button"
+                    >
+                      No, stay signed in
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </main>
     </>
   );
